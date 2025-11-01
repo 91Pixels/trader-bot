@@ -86,10 +86,6 @@ pipeline {
             echo '[SUCCESS] All stages completed successfully!'
         }
         
-        unstable {
-            echo '[UNSTABLE] Some tests failed but build continued.'
-        }
-        
         failure {
             echo '[FAILURE] Build failed!'
         }
