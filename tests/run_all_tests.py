@@ -58,16 +58,16 @@ def run_all_tests():
         print("="*70)
         print("TEST EXECUTION COMPLETE")
         print("="*70)
-        print(f"✅ HTML Report: {html_report}")
-        print(f"✅ Latest Report: {latest_report}")
-        print(f"✅ Coverage Report: htmlcov/index.html")
-        print(f"✅ JUnit XML: {os.path.join(reports_dir, f'junit_{timestamp}.xml')}")
+        print(f"[OK] HTML Report: {html_report}")
+        print(f"[OK] Latest Report: {latest_report}")
+        print(f"[OK] Coverage Report: htmlcov/index.html")
+        print(f"[OK] JUnit XML: {os.path.join(reports_dir, f'junit_{timestamp}.xml')}")
         print("="*70)
         
         return result.returncode
         
     except Exception as e:
-        print(f"\n❌ Error running tests: {str(e)}")
+        print(f"\n[ERROR] Error running tests: {str(e)}")
         return 1
 
 
