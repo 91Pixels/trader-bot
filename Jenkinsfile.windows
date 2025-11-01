@@ -5,6 +5,7 @@ pipeline {
         PYTHON_VERSION = '3.10'
         PROJECT_NAME = 'BTC-Trading-Bot'
         TRADING_MODE = 'SIMULATION'
+        PATH = "C:\\Users\\393di\\AppData\\Local\\Programs\\Python\\Python310;C:\\Users\\393di\\AppData\\Local\\Programs\\Python\\Python310\\Scripts;${env.PATH}"
     }
     
     stages {
@@ -18,23 +19,23 @@ pipeline {
         stage('Environment Setup') {
             steps {
                 echo '🔧 Setting up Python environment...'
-                bat 'py --version'
-                bat 'py -m pip install --upgrade pip'
+                bat 'python --version'
+                bat 'python -m pip install --upgrade pip'
             }
         }
         
         stage('Install Dependencies') {
             steps {
                 echo '📦 Installing dependencies...'
-                bat 'py -m pip install -r requirements.txt'
-                bat 'py -m pip install pytest pytest-cov pytest-html'
+                bat 'python -m pip install -r requirements.txt'
+                bat 'python -m pip install pytest pytest-cov pytest-html'
             }
         }
         
         stage('Run All Tests') {
             steps {
                 echo '🧪 Running 118 unit tests...'
-                bat 'py tests/run_all_tests.py'
+                bat 'python tests/run_all_tests.py'
             }
         }
         
@@ -42,9 +43,9 @@ pipeline {
             steps {
                 echo '🔍 Running code quality checks...'
                 bat '''
-                    py -m pip install pylint flake8
-                    py -m pylint btc_trader.py --exit-zero || exit 0
-                    py -m flake8 . --max-line-length=120 --exit-zero || exit 0
+                    python -m pip install pylint flake8
+                    python -m pylint btc_trader.py --exit-zero || exit 0
+                    python -m flake8 . --max-line-length=120 --exit-zero || exit 0
                 '''
             }
         }
@@ -52,7 +53,7 @@ pipeline {
         stage('Coverage Report') {
             steps {
                 echo '📊 Generating coverage report...'
-                bat 'py -m pytest tests/ --cov=. --cov-report=html --cov-report=xml'
+                bat 'python -m pytest tests/ --cov=. --cov-report=html --cov-report=xml'
             }
         }
         
