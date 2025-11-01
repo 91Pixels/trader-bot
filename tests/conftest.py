@@ -34,8 +34,8 @@ def pytest_collection_modifyitems(config, items):
     skip_credentials = pytest.mark.skip(reason="API credentials not available in CI environment")
     
     for item in items:
-        # Skip tests in test_coinbase_credentials.py that check for credentials
-        if "test_coinbase_credentials.py" in str(item.fspath):
+        # Skip tests that check for credentials
+        if "test_coinbase_credentials.py" in str(item.fspath) or "test_wallet_balance.py" in str(item.fspath):
             if any(name in item.name for name in [
                 "test_api_key_format",
                 "test_api_secret_format", 
