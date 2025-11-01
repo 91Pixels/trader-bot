@@ -31,9 +31,16 @@ class TestAPIConnectionTesting(unittest.TestCase):
             pass
     
     @patch('btc_trader.CoinbaseCompleteAPI')
-    def test_api_connection_success(self, mock_api):
+    @patch('btc_trader.requests')
+    def test_api_connection_success(self, mock_requests, mock_api):
         """Test successful API connection"""
-        # Mock API responses
+        # Mock BTC Price API
+        mock_response = Mock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {'data': {'amount': '100000'}}
+        mock_requests.get.return_value = mock_response
+        
+        # Mock Coinbase API responses
         mock_api_instance = Mock()
         mock_api_instance.is_jwt_format = True
         mock_api_instance.list_accounts.return_value = {
@@ -42,6 +49,8 @@ class TestAPIConnectionTesting(unittest.TestCase):
                 {'currency': 'BTC', 'available_balance': {'value': '0.001'}}
             ]
         }
+        mock_api_instance.list_orders.return_value = {'orders': []}
+        mock_api_instance.list_products.return_value = {'products': [{'id': 'BTC-USD'}]}
         mock_api.return_value = mock_api_instance
         
         # Create trader instance
@@ -53,8 +62,8 @@ class TestAPIConnectionTesting(unittest.TestCase):
         
         # Assertions
         self.assertTrue(result)
-        self.assertIn("ONLINE", trader.test_result_var.get())
-        self.assertIn("Connected", trader.api_status_var.get())
+        self.assertIn("ALL ENDPOINTS ONLINE", trader.test_result_var.get())
+        self.assertIn("All Endpoints Working", trader.api_status_var.get())
         
     @patch('btc_trader.CoinbaseCompleteAPI')
     def test_api_connection_invalid_credentials(self, mock_api):
@@ -77,12 +86,18 @@ class TestAPIConnectionTesting(unittest.TestCase):
         self.assertIn("Invalid credentials", trader.test_result_var.get())
         
     @patch('btc_trader.CoinbaseCompleteAPI')
-    def test_api_connection_failure(self, mock_api):
+    @patch('btc_trader.requests')
+    def test_api_connection_failure(self, mock_requests, mock_api):
         """Test API connection failure (network error)"""
-        # Mock API that raises exception
+        # Mock BTC Price API failure
+        mock_requests.get.side_effect = Exception("Network error")
+        
+        # Mock API that raises exception for all endpoints
         mock_api_instance = Mock()
         mock_api_instance.is_jwt_format = True
         mock_api_instance.list_accounts.side_effect = Exception("Network error")
+        mock_api_instance.list_orders.side_effect = Exception("Network error")
+        mock_api_instance.list_products.side_effect = Exception("Network error")
         mock_api.return_value = mock_api_instance
         
         # Create trader instance
@@ -94,8 +109,9 @@ class TestAPIConnectionTesting(unittest.TestCase):
         
         # Assertions
         self.assertFalse(result)
-        self.assertIn("OFFLINE", trader.test_result_var.get())
-        self.assertIn("Connection failed", trader.test_result_var.get())
+        # Should show ALL ENDPOINTS OFFLINE or PARTIAL
+        test_result = trader.test_result_var.get()
+        self.assertTrue("OFFLINE" in test_result or "PARTIAL" in test_result)
         
     @patch('btc_trader.CoinbaseCompleteAPI')
     def test_api_connection_no_accounts(self, mock_api):

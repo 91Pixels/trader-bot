@@ -641,6 +641,23 @@ class BTCTrader:
         )
         self.test_result_label.pack(anchor='w', pady=5)
         
+        # Endpoints Status Section (NEW)
+        ttk.Separator(status_frame, orient='horizontal').pack(fill=tk.X, pady=5)
+        ttk.Label(status_frame, text="Endpoints Status:", font=('Helvetica', 10, 'bold')).pack(anchor='w', pady=2)
+        
+        # Individual endpoint status labels
+        self.endpoint_btc_price_var = tk.StringVar(value="📊 BTC Price: ⚪ Not tested")
+        ttk.Label(status_frame, textvariable=self.endpoint_btc_price_var, font=('Helvetica', 9)).pack(anchor='w', padx=20, pady=1)
+        
+        self.endpoint_wallet_var = tk.StringVar(value="💰 Wallet Balance: ⚪ Not tested")
+        ttk.Label(status_frame, textvariable=self.endpoint_wallet_var, font=('Helvetica', 9)).pack(anchor='w', padx=20, pady=1)
+        
+        self.endpoint_orders_var = tk.StringVar(value="📝 Orders (Buy/Sell): ⚪ Not tested")
+        ttk.Label(status_frame, textvariable=self.endpoint_orders_var, font=('Helvetica', 9)).pack(anchor='w', padx=20, pady=1)
+        
+        self.endpoint_products_var = tk.StringVar(value="📈 Products: ⚪ Not tested")
+        ttk.Label(status_frame, textvariable=self.endpoint_products_var, font=('Helvetica', 9)).pack(anchor='w', padx=20, pady=1)
+        
         # Action Buttons
         button_frame = ttk.Frame(self.config_tab)
         button_frame.pack(fill=tk.X, padx=10, pady=15)
@@ -789,13 +806,17 @@ class BTCTrader:
             print(f"\n❌ Error reloading configuration: {e}")
     
     def test_api_connection(self):
-        """Test API connection and show visual result"""
+        """Test API connection and show visual result for each endpoint"""
         try:
-            print("\n🔄 Testing API connection...")
+            print("\n🔄 Testing API endpoints...")
             
-            # Clear previous result
-            self.test_result_var.set("🔄 Testing connection...")
+            # Clear previous results
+            self.test_result_var.set("🔄 Testing endpoints...")
             self.test_result_label.configure(foreground='blue')
+            self.endpoint_btc_price_var.set("📊 BTC Price: 🔄 Testing...")
+            self.endpoint_wallet_var.set("💰 Wallet Balance: 🔄 Testing...")
+            self.endpoint_orders_var.set("📝 Orders (Buy/Sell): 🔄 Testing...")
+            self.endpoint_products_var.set("📈 Products: 🔄 Testing...")
             self.root.update()
             
             if not self.api.is_jwt_format:
@@ -803,39 +824,121 @@ class BTCTrader:
                 self.test_result_var.set("🔴 OFFLINE - Invalid credentials format")
                 self.test_result_label.configure(foreground='red')
                 self.api_status_var.set("Coinbase API: ❌ Not Connected")
+                
+                # Update all endpoints to offline
+                self.endpoint_btc_price_var.set("📊 BTC Price: 🔴 OFFLINE")
+                self.endpoint_wallet_var.set("💰 Wallet Balance: 🔴 OFFLINE")
+                self.endpoint_orders_var.set("📝 Orders (Buy/Sell): 🔴 OFFLINE")
+                self.endpoint_products_var.set("📈 Products: 🔴 OFFLINE")
                 return False
             
-            # Try to get accounts
-            accounts = self.api.list_accounts()
+            endpoints_status = {}
+            all_online = True
             
-            if accounts and 'accounts' in accounts:
-                num_accounts = len(accounts['accounts'])
-                
-                if num_accounts > 0:
-                    print(f"✅ API Connection Successful!")
-                    print(f"   Found {num_accounts} accounts")
-                    
-                    # Update status - SUCCESS
-                    self.test_result_var.set(f"🟢 ONLINE - Connected ({num_accounts} accounts)")
-                    self.test_result_label.configure(foreground='green')
-                    self.api_status_var.set("Coinbase API: ✅ Connected & Working")
-                    return True
+            # Test 1: BTC Price Endpoint (Public API)
+            try:
+                import requests
+                response = requests.get('https://api.coinbase.com/v2/prices/BTC-USD/spot', timeout=5)
+                if response.status_code == 200:
+                    price = float(response.json()['data']['amount'])
+                    self.endpoint_btc_price_var.set(f"📊 BTC Price: 🟢 ONLINE (${price:,.2f})")
+                    endpoints_status['btc_price'] = True
+                    print(f"✅ BTC Price Endpoint: ONLINE (${price:,.2f})")
                 else:
-                    print("⚠️ API responded but no accounts found")
-                    self.test_result_var.set("🟡 PARTIAL - API responds but no accounts")
-                    self.test_result_label.configure(foreground='orange')
-                    return False
-            else:
-                print("⚠️ API responded but no accounts found")
-                self.test_result_var.set("🟡 PARTIAL - API responds but no accounts")
+                    self.endpoint_btc_price_var.set("📊 BTC Price: 🔴 OFFLINE")
+                    endpoints_status['btc_price'] = False
+                    all_online = False
+                    print("❌ BTC Price Endpoint: OFFLINE")
+            except Exception as e:
+                self.endpoint_btc_price_var.set("📊 BTC Price: 🔴 OFFLINE")
+                endpoints_status['btc_price'] = False
+                all_online = False
+                print(f"❌ BTC Price Endpoint: OFFLINE - {e}")
+            
+            # Test 2: Wallet Balance Endpoint
+            try:
+                accounts = self.api.list_accounts()
+                if accounts and 'accounts' in accounts:
+                    num_accounts = len(accounts['accounts'])
+                    self.endpoint_wallet_var.set(f"💰 Wallet Balance: 🟢 ONLINE ({num_accounts} accounts)")
+                    endpoints_status['wallet'] = True
+                    print(f"✅ Wallet Balance Endpoint: ONLINE ({num_accounts} accounts)")
+                else:
+                    self.endpoint_wallet_var.set("💰 Wallet Balance: 🟡 PARTIAL")
+                    endpoints_status['wallet'] = False
+                    all_online = False
+                    print("⚠️ Wallet Balance Endpoint: PARTIAL")
+            except Exception as e:
+                self.endpoint_wallet_var.set("💰 Wallet Balance: 🔴 OFFLINE")
+                endpoints_status['wallet'] = False
+                all_online = False
+                print(f"❌ Wallet Balance Endpoint: OFFLINE - {e}")
+            
+            # Test 3: Orders Endpoint (Buy/Sell)
+            try:
+                orders = self.api.list_orders()
+                if orders is not None:
+                    self.endpoint_orders_var.set("📝 Orders (Buy/Sell): 🟢 ONLINE")
+                    endpoints_status['orders'] = True
+                    print("✅ Orders Endpoint: ONLINE")
+                else:
+                    self.endpoint_orders_var.set("📝 Orders (Buy/Sell): 🔴 OFFLINE")
+                    endpoints_status['orders'] = False
+                    all_online = False
+                    print("❌ Orders Endpoint: OFFLINE")
+            except Exception as e:
+                self.endpoint_orders_var.set("📝 Orders (Buy/Sell): 🔴 OFFLINE")
+                endpoints_status['orders'] = False
+                all_online = False
+                print(f"❌ Orders Endpoint: OFFLINE - {e}")
+            
+            # Test 4: Products Endpoint
+            try:
+                products = self.api.list_products()
+                if products and 'products' in products:
+                    num_products = len(products['products'])
+                    self.endpoint_products_var.set(f"📈 Products: 🟢 ONLINE ({num_products} products)")
+                    endpoints_status['products'] = True
+                    print(f"✅ Products Endpoint: ONLINE ({num_products} products)")
+                else:
+                    self.endpoint_products_var.set("📈 Products: 🔴 OFFLINE")
+                    endpoints_status['products'] = False
+                    all_online = False
+                    print("❌ Products Endpoint: OFFLINE")
+            except Exception as e:
+                self.endpoint_products_var.set("📈 Products: 🔴 OFFLINE")
+                endpoints_status['products'] = False
+                all_online = False
+                print(f"❌ Products Endpoint: OFFLINE - {e}")
+            
+            # Final status
+            online_count = sum(endpoints_status.values())
+            total_count = len(endpoints_status)
+            
+            if all_online:
+                self.test_result_var.set(f"🟢 ALL ENDPOINTS ONLINE ({total_count}/{total_count})")
+                self.test_result_label.configure(foreground='green')
+                self.api_status_var.set("Coinbase API: ✅ All Endpoints Working")
+                print(f"\n✅ All {total_count} endpoints are ONLINE")
+                return True
+            elif online_count > 0:
+                self.test_result_var.set(f"🟡 PARTIAL ({online_count}/{total_count} endpoints online)")
                 self.test_result_label.configure(foreground='orange')
+                self.api_status_var.set(f"Coinbase API: ⚠️ {online_count}/{total_count} Endpoints Working")
+                print(f"\n⚠️ {online_count}/{total_count} endpoints are online")
+                return False
+            else:
+                self.test_result_var.set(f"🔴 ALL ENDPOINTS OFFLINE (0/{total_count})")
+                self.test_result_label.configure(foreground='red')
+                self.api_status_var.set("Coinbase API: ❌ All Endpoints Failed")
+                print(f"\n❌ All {total_count} endpoints are OFFLINE")
                 return False
                 
         except Exception as e:
-            print(f"❌ API Connection Failed: {e}")
-            self.test_result_var.set(f"🔴 OFFLINE - Connection failed")
+            print(f"❌ API Connection Test Failed: {e}")
+            self.test_result_var.set(f"🔴 TEST FAILED")
             self.test_result_label.configure(foreground='red')
-            self.api_status_var.set("Coinbase API: ❌ Connection Failed")
+            self.api_status_var.set("Coinbase API: ❌ Test Failed")
             return False
         
     def toggle_auto_buy(self):
