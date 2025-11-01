@@ -1,0 +1,113 @@
+pipeline {
+    agent any
+    
+    environment {
+        PYTHON_VERSION = '3.10'
+        PROJECT_NAME = 'BTC-Trading-Bot'
+        TRADING_MODE = 'SIMULATION'
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                echo '📥 Checking out code...'
+                checkout scm
+            }
+        }
+        
+        stage('Environment Setup') {
+            steps {
+                echo '🔧 Setting up Python environment...'
+                bat 'python --version'
+                bat 'pip install --upgrade pip'
+            }
+        }
+        
+        stage('Install Dependencies') {
+            steps {
+                echo '📦 Installing dependencies...'
+                bat 'pip install -r requirements.txt'
+                bat 'pip install pytest pytest-cov pytest-html'
+            }
+        }
+        
+        stage('Run All Tests') {
+            steps {
+                echo '🧪 Running 118 unit tests...'
+                bat 'python tests/run_all_tests.py'
+            }
+        }
+        
+        stage('Code Quality') {
+            steps {
+                echo '🔍 Running code quality checks...'
+                bat '''
+                    pip install pylint flake8
+                    pylint btc_trader.py --exit-zero || exit 0
+                    flake8 . --max-line-length=120 --exit-zero || exit 0
+                '''
+            }
+        }
+        
+        stage('Coverage Report') {
+            steps {
+                echo '📊 Generating coverage report...'
+                bat 'python -m pytest tests/ --cov=. --cov-report=html --cov-report=xml'
+            }
+        }
+        
+        stage('Deploy to Dev') {
+            when {
+                expression { currentBuild.result == null || currentBuild.result == 'SUCCESS' }
+            }
+            steps {
+                echo '🚀 Pushing to dev branch...'
+                script {
+                    withCredentials([usernamePassword(credentialsId: 'github-credentials', passwordVariable: 'GIT_PASSWORD', usernameVariable: 'GIT_USERNAME')]) {
+                        bat """
+                            git config user.email "jenkins@bot.com"
+                            git config user.name "Jenkins Bot"
+                            git checkout dev || git checkout -b dev
+                            git add .
+                            git commit -m "Jenkins: Tests passed - Auto deploy to dev [BUILD #${BUILD_NUMBER}]" || echo "No changes to commit"
+                            git push https://%GIT_USERNAME%:%GIT_PASSWORD%@github.com/91Pixels/trader-bot.git dev
+                        """
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            echo '🧹 Archiving results...'
+            junit allowEmptyResults: true, testResults: '**/test-reports/*.xml'
+            
+            publishHTML(target: [
+                allowMissing: true,
+                alwaysLinkToLastBuild: true,
+                keepAll: true,
+                reportDir: 'test-reports',
+                reportFiles: 'test_report_latest.html',
+                reportName: 'Test Report'
+            ])
+            
+            publishHTML(target: [
+                allowMissing: true,
+                alwaysLinkToLastBuild: true,
+                keepAll: true,
+                reportDir: 'htmlcov',
+                reportFiles: 'index.html',
+                reportName: 'Coverage Report'
+            ])
+        }
+        
+        success {
+            echo '✅ All tests passed! Build successful.'
+        }
+        
+        failure {
+            echo '❌ Tests failed! Build failed.'
+        }
+    }
+}
