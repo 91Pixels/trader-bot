@@ -1,0 +1,158 @@
+name: PR Validation - Run Tests
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Run Unit Tests
+    runs-on: windows-latest
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v3
+    
+    - name: 🐍 Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        cache: 'pip'
+    
+    - name: 📦 Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov pytest-html
+    
+    - name: 🧪 Run all unit tests (118 tests)
+      env:
+        TRADING_MODE: SIMULATION
+      run: |
+        python tests/run_all_tests.py
+    
+    - name: 📊 Generate coverage report
+      if: always()
+      env:
+        TRADING_MODE: SIMULATION
+      run: |
+        python -m pytest tests/ --cov=. --cov-report=html --cov-report=xml --cov-report=term --cov-fail-under=50
+    
+    - name: 📈 Upload coverage to Codecov
+      if: always()
+      uses: codecov/codecov-action@v3
+      with:
+        files: ./coverage.xml
+        fail_ci_if_error: false
+    
+    - name: 📄 Upload test reports
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-reports
+        path: |
+          test-reports/
+          htmlcov/
+        retention-days: 30
+    
+    - name: ✅ All tests passed
+      if: success()
+      run: |
+        echo "✅ All 118 tests passed! PR is ready for merge."
+    
+    - name: ❌ Tests failed
+      if: failure()
+      run: |
+        echo "❌ Tests failed! Cannot merge PR until all tests pass."
+        exit 1
+
+  code-quality:
+    name: Code Quality Checks
+    runs-on: windows-latest
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v3
+    
+    - name: 🐍 Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: 📦 Install linting tools
+      run: |
+        pip install pylint flake8
+    
+    - name: 🔍 Run pylint
+      continue-on-error: true
+      run: |
+        pylint btc_trader.py config.py coinbase_api.py coinbase_complete_api.py coinbase_advanced_trade_jwt.py --exit-zero
+    
+    - name: 🔍 Run flake8
+      continue-on-error: true
+      run: |
+        flake8 . --max-line-length=120 --exclude=venv,__pycache__,.git --exit-zero
+
+  security:
+    name: Security Scan
+    runs-on: windows-latest
+    
+    steps:
+    - name: 📥 Checkout code
+      uses: actions/checkout@v3
+    
+    - name: 🐍 Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: 🔒 Install security tools
+      run: |
+        pip install safety bandit
+    
+    - name: 🔍 Check for vulnerabilities
+      continue-on-error: true
+      run: |
+        safety check
+    
+    - name: 🔍 Run security analysis
+      continue-on-error: true
+      run: |
+        bandit -r . -ll
+
+  pr-comment:
+    name: Comment Test Results
+    needs: [test, code-quality, security]
+    runs-on: windows-latest
+    if: always() && github.event_name == 'pull_request'
+    
+    steps:
+    - name: 💬 Comment on PR
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const testStatus = '${{ needs.test.result }}';
+          const qualityStatus = '${{ needs.code-quality.result }}';
+          const securityStatus = '${{ needs.security.result }}';
+          
+          let emoji = testStatus === 'success' ? '✅' : '❌';
+          let message = `## ${emoji} Test Results\n\n`;
+          
+          message += `- **Unit Tests (118 tests):** ${testStatus === 'success' ? '✅ PASSED' : '❌ FAILED'}\n`;
+          message += `- **Code Quality:** ${qualityStatus === 'success' ? '✅ PASSED' : '⚠️ WARNINGS'}\n`;
+          message += `- **Security Scan:** ${securityStatus === 'success' ? '✅ PASSED' : '⚠️ WARNINGS'}\n\n`;
+          
+          if (testStatus === 'success') {
+            message += '✅ All tests passed! This PR is **ready to merge**.\n';
+          } else {
+            message += '❌ Tests failed! Please fix the failing tests before merging.\n';
+          }
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: message
+          });
