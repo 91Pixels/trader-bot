@@ -58,30 +58,6 @@ pipeline {
     }
     
     post {
-        always {
-            echo '🧹 Archiving results...'
-            junit allowEmptyResults: true, testResults: '**/test-reports/*.xml'
-            
-            // publishHTML plugin not installed - uncomment after installing HTML Publisher plugin
-            // publishHTML(target: [
-            //     allowMissing: true,
-            //     alwaysLinkToLastBuild: true,
-            //     keepAll: true,
-            //     reportDir: 'test-reports',
-            //     reportFiles: 'test_report_latest.html',
-            //     reportName: 'Test Report'
-            // ])
-            
-            // publishHTML(target: [
-            //     allowMissing: true,
-            //     alwaysLinkToLastBuild: true,
-            //     keepAll: true,
-            //     reportDir: 'htmlcov',
-            //     reportFiles: 'index.html',
-            //     reportName: 'Coverage Report'
-            // ])
-        }
-        
         success {
             echo '[SUCCESS] All stages completed successfully!'
         }
