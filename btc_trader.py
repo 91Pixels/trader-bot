@@ -199,8 +199,27 @@ class BTCTrader:
         # Initialize entry_price_var (used internally, not displayed)
         self.entry_price_var = tk.StringVar(value="0")
         
+        # Create Notebook (Tab Container)
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Create tabs
+        self.trading_tab = ttk.Frame(self.notebook)
+        self.config_tab = ttk.Frame(self.notebook)
+        
+        self.notebook.add(self.trading_tab, text='📊 Trading')
+        self.notebook.add(self.config_tab, text='⚙️ Configuration')
+        
+        # Create Trading Tab Content
+        self.create_trading_tab()
+        
+        # Create Configuration Tab Content
+        self.create_configuration_tab()
+        
+    def create_trading_tab(self):
+        """Create the main trading interface"""
         # Price Display
-        price_frame = ttk.LabelFrame(self.root, text="Live BTC Price", padding="10")
+        price_frame = ttk.LabelFrame(self.trading_tab, text="Live BTC Price", padding="10")
         price_frame.pack(fill=tk.X, padx=10, pady=5)
         
         self.price_var = tk.StringVar(value="$0.00")
@@ -229,7 +248,7 @@ class BTCTrader:
         ).pack()
         
         # Trading Settings
-        self.settings_frame = ttk.LabelFrame(self.root, text="Trading Settings", padding="10")
+        self.settings_frame = ttk.LabelFrame(self.trading_tab, text="Trading Settings", padding="10")
         self.settings_frame.pack(fill=tk.X, padx=10, pady=5)
         
         # Profit target setting
@@ -269,7 +288,7 @@ class BTCTrader:
         ).pack(pady=5)
         
         # Auto Buy Section
-        autobuy_frame = ttk.LabelFrame(self.root, text="🤖 Auto Buy Configuration", padding="10")
+        autobuy_frame = ttk.LabelFrame(self.trading_tab, text="🤖 Auto Buy Configuration", padding="10")
         autobuy_frame.pack(fill=tk.X, padx=10, pady=5)
         
         # Enable Auto Buy checkbox
@@ -307,7 +326,7 @@ class BTCTrader:
         ).pack(pady=5)
         
         # Auto Sell Section
-        autosell_frame = ttk.LabelFrame(self.root, text="🤖 Auto Sell Configuration", padding="10")
+        autosell_frame = ttk.LabelFrame(self.trading_tab, text="🤖 Auto Sell Configuration", padding="10")
         autosell_frame.pack(fill=tk.X, padx=10, pady=5)
         
         # Enable Auto Sell checkbox
@@ -352,7 +371,7 @@ class BTCTrader:
         ).pack(pady=5)
         
         # Position Information
-        position_frame = ttk.LabelFrame(self.root, text="Current Position & Profit Calculator", padding="10")
+        position_frame = ttk.LabelFrame(self.trading_tab, text="Current Position & Profit Calculator", padding="10")
         position_frame.pack(fill=tk.X, padx=10, pady=5)
         
         # Entry Price and Status
@@ -436,7 +455,7 @@ class BTCTrader:
         
         # Account Information
         account_title = "Account (Real Balance from Coinbase)" if self.using_real_balance else "Account (Mock Balance)"
-        account_frame = ttk.LabelFrame(self.root, text=account_title, padding="10")
+        account_frame = ttk.LabelFrame(self.trading_tab, text=account_title, padding="10")
         account_frame.pack(fill=tk.X, padx=10, pady=5)
         
         self.balance_var = tk.StringVar(
@@ -494,7 +513,7 @@ class BTCTrader:
             ).pack()
         
         # Statistics
-        stats_frame = ttk.LabelFrame(self.root, text="Statistics", padding="10")
+        stats_frame = ttk.LabelFrame(self.trading_tab, text="Statistics", padding="10")
         stats_frame.pack(fill=tk.X, padx=10, pady=5)
         
         self.stats_var = tk.StringVar(value="No trades yet")
@@ -505,7 +524,7 @@ class BTCTrader:
         ).pack()
         
         # Control buttons
-        button_frame = ttk.Frame(self.root)
+        button_frame = ttk.Frame(self.trading_tab)
         button_frame.pack(pady=10)
         
         self.start_button = ttk.Button(
@@ -522,6 +541,247 @@ class BTCTrader:
             state='disabled'
         )
         self.buy_button.pack(side=tk.LEFT, padx=5)
+        
+    def create_configuration_tab(self):
+        """Create the configuration interface"""
+        # API Configuration Section
+        api_frame = ttk.LabelFrame(self.config_tab, text="🔐 API Configuration", padding="15")
+        api_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # API Key
+        key_frame = ttk.Frame(api_frame)
+        key_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(key_frame, text="API Key:", width=20).pack(side=tk.LEFT)
+        self.api_key_var = tk.StringVar(value=self.mask_api_key(Config.COINBASE_API_KEY))
+        api_key_entry = ttk.Entry(key_frame, textvariable=self.api_key_var, width=40, show="*")
+        api_key_entry.pack(side=tk.LEFT, padx=5)
+        ttk.Button(key_frame, text="👁️", width=3, command=lambda: self.toggle_visibility(api_key_entry)).pack(side=tk.LEFT)
+        
+        # API Secret
+        secret_frame = ttk.Frame(api_frame)
+        secret_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(secret_frame, text="API Secret:", width=20).pack(side=tk.LEFT)
+        self.api_secret_var = tk.StringVar(value=self.mask_api_key(Config.COINBASE_API_SECRET))
+        api_secret_entry = ttk.Entry(secret_frame, textvariable=self.api_secret_var, width=40, show="*")
+        api_secret_entry.pack(side=tk.LEFT, padx=5)
+        ttk.Button(secret_frame, text="👁️", width=3, command=lambda: self.toggle_visibility(api_secret_entry)).pack(side=tk.LEFT)
+        
+        # Trading Mode
+        mode_frame = ttk.Frame(api_frame)
+        mode_frame.pack(fill=tk.X, pady=10)
+        ttk.Label(mode_frame, text="Trading Mode:", width=20).pack(side=tk.LEFT)
+        self.config_mode_var = tk.StringVar(value=Config.TRADING_MODE)
+        ttk.Radiobutton(mode_frame, text="SIMULATION", variable=self.config_mode_var, value="SIMULATION").pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(mode_frame, text="LIVE", variable=self.config_mode_var, value="LIVE").pack(side=tk.LEFT, padx=5)
+        
+        ttk.Label(
+            api_frame,
+            text="⚠️ LIVE mode requires valid API credentials and will execute real trades",
+            font=('Helvetica', 8),
+            foreground='red'
+        ).pack(pady=5)
+        
+        # Trading Parameters Section
+        params_frame = ttk.LabelFrame(self.config_tab, text="📊 Trading Parameters", padding="15")
+        params_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Fee Rates
+        buy_fee_frame = ttk.Frame(params_frame)
+        buy_fee_frame.pack(fill=tk.X, pady=3)
+        ttk.Label(buy_fee_frame, text="Buy Fee Rate (%):", width=20).pack(side=tk.LEFT)
+        self.config_buy_fee_var = tk.StringVar(value=str(self.buy_fee_rate * 100))
+        ttk.Entry(buy_fee_frame, textvariable=self.config_buy_fee_var, width=10).pack(side=tk.LEFT, padx=5)
+        
+        sell_fee_frame = ttk.Frame(params_frame)
+        sell_fee_frame.pack(fill=tk.X, pady=3)
+        ttk.Label(sell_fee_frame, text="Sell Fee Rate (%):", width=20).pack(side=tk.LEFT)
+        self.config_sell_fee_var = tk.StringVar(value=str(self.sell_fee_rate * 100))
+        ttk.Entry(sell_fee_frame, textvariable=self.config_sell_fee_var, width=10).pack(side=tk.LEFT, padx=5)
+        
+        # Position Size
+        position_frame = ttk.Frame(params_frame)
+        position_frame.pack(fill=tk.X, pady=3)
+        ttk.Label(position_frame, text="Default Position Size ($):", width=20).pack(side=tk.LEFT)
+        self.config_position_var = tk.StringVar(value=str(self.position_size))
+        ttk.Entry(position_frame, textvariable=self.config_position_var, width=10).pack(side=tk.LEFT, padx=5)
+        
+        # Connection Status Section
+        status_frame = ttk.LabelFrame(self.config_tab, text="📡 Connection Status", padding="15")
+        status_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # API Status
+        api_status_text = "✅ Connected" if self.api.is_jwt_format else "❌ Not Connected"
+        self.api_status_var = tk.StringVar(value=f"Coinbase API: {api_status_text}")
+        ttk.Label(status_frame, textvariable=self.api_status_var, font=('Helvetica', 10)).pack(anchor='w', pady=2)
+        
+        # Balance Status
+        balance_status_text = "✅ Using Real Balance" if self.using_real_balance else "⚠️ Using Mock Balance"
+        self.config_balance_status_var = tk.StringVar(value=f"Balance: {balance_status_text}")
+        ttk.Label(status_frame, textvariable=self.config_balance_status_var, font=('Helvetica', 10)).pack(anchor='w', pady=2)
+        
+        # Mode Status
+        mode_status_text = f"Mode: {Config.TRADING_MODE}"
+        self.mode_status_var = tk.StringVar(value=mode_status_text)
+        ttk.Label(status_frame, textvariable=self.mode_status_var, font=('Helvetica', 10)).pack(anchor='w', pady=2)
+        
+        # Action Buttons
+        button_frame = ttk.Frame(self.config_tab)
+        button_frame.pack(fill=tk.X, padx=10, pady=15)
+        
+        ttk.Button(
+            button_frame,
+            text="💾 Save Configuration to .env",
+            command=self.save_configuration
+        ).pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(
+            button_frame,
+            text="🔄 Reload Configuration",
+            command=self.reload_configuration
+        ).pack(side=tk.LEFT, padx=5)
+        
+        ttk.Button(
+            button_frame,
+            text="🧪 Test API Connection",
+            command=self.test_api_connection
+        ).pack(side=tk.LEFT, padx=5)
+        
+        # Info Section
+        info_frame = ttk.Frame(self.config_tab)
+        info_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        info_text = (
+            "ℹ️ Configuration Tips:\n\n"
+            "• API credentials are stored in the .env file\n"
+            "• SIMULATION mode is safe for testing\n"
+            "• LIVE mode requires valid API keys with trading permissions\n"
+            "• Fee rates are typically 0.6% (0.006) for Coinbase\n"
+            "• Always test with SIMULATION mode first\n"
+        )
+        ttk.Label(
+            info_frame,
+            text=info_text,
+            font=('Helvetica', 9),
+            foreground='blue',
+            justify='left'
+        ).pack(anchor='w')
+    
+    def mask_api_key(self, key):
+        """Mask API key for display"""
+        if not key or len(key) < 8:
+            return "Not Set"
+        return key[:4] + "*" * (len(key) - 8) + key[-4:]
+    
+    def toggle_visibility(self, entry_widget):
+        """Toggle password visibility"""
+        if entry_widget.cget('show') == '*':
+            entry_widget.configure(show='')
+        else:
+            entry_widget.configure(show='*')
+    
+    def save_configuration(self):
+        """Save configuration to .env file"""
+        try:
+            import os
+            from pathlib import Path
+            
+            env_path = Path('.env')
+            
+            # Read current .env
+            env_content = {}
+            if env_path.exists():
+                with open(env_path, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#') and '=' in line:
+                            key, value = line.split('=', 1)
+                            env_content[key.strip()] = value.strip()
+            
+            # Update values
+            api_key = self.api_key_var.get()
+            api_secret = self.api_secret_var.get()
+            
+            if not api_key.startswith('*'):
+                env_content['COINBASE_API_KEY'] = api_key
+            if not api_secret.startswith('*'):
+                env_content['COINBASE_API_SECRET'] = api_secret
+            
+            env_content['TRADING_MODE'] = self.config_mode_var.get()
+            
+            # Write back
+            with open(env_path, 'w') as f:
+                for key, value in env_content.items():
+                    f.write(f"{key}={value}\n")
+            
+            # Update runtime config
+            try:
+                self.buy_fee_rate = float(self.config_buy_fee_var.get()) / 100
+                self.sell_fee_rate = float(self.config_sell_fee_var.get()) / 100
+                self.position_size = float(self.config_position_var.get())
+            except ValueError:
+                pass
+            
+            print("\n✅ Configuration saved to .env file")
+            print("⚠️ Restart the application to apply API changes")
+            
+        except Exception as e:
+            print(f"\n❌ Error saving configuration: {e}")
+    
+    def reload_configuration(self):
+        """Reload configuration from .env"""
+        try:
+            from dotenv import load_dotenv
+            import os
+            
+            load_dotenv(override=True)
+            
+            # Update Config class
+            Config.COINBASE_API_KEY = os.getenv('COINBASE_API_KEY', '')
+            Config.COINBASE_API_SECRET = os.getenv('COINBASE_API_SECRET', '')
+            Config.TRADING_MODE = os.getenv('TRADING_MODE', 'SIMULATION')
+            
+            # Update display
+            self.api_key_var.set(self.mask_api_key(Config.COINBASE_API_KEY))
+            self.api_secret_var.set(self.mask_api_key(Config.COINBASE_API_SECRET))
+            self.config_mode_var.set(Config.TRADING_MODE)
+            self.mode_status_var.set(f"Mode: {Config.TRADING_MODE}")
+            
+            # Reinitialize API
+            self.api = CoinbaseCompleteAPI()
+            
+            # Update status
+            api_status_text = "✅ Connected" if self.api.is_jwt_format else "❌ Not Connected"
+            self.api_status_var.set(f"Coinbase API: {api_status_text}")
+            
+            print("\n✅ Configuration reloaded successfully")
+            
+        except Exception as e:
+            print(f"\n❌ Error reloading configuration: {e}")
+    
+    def test_api_connection(self):
+        """Test API connection"""
+        try:
+            print("\n🔄 Testing API connection...")
+            
+            if not self.api.is_jwt_format:
+                print("❌ API not initialized (invalid credentials format)")
+                return
+            
+            # Try to get accounts
+            accounts = self.api.list_accounts()
+            
+            if accounts and 'accounts' in accounts:
+                print(f"✅ API Connection Successful!")
+                print(f"   Found {len(accounts['accounts'])} accounts")
+                
+                # Update status
+                self.api_status_var.set("Coinbase API: ✅ Connected & Working")
+            else:
+                print("⚠️ API responded but no accounts found")
+                
+        except Exception as e:
+            print(f"❌ API Connection Failed: {e}")
+            self.api_status_var.set("Coinbase API: ❌ Connection Failed")
         
     def toggle_auto_buy(self):
         """Enable/disable auto buy"""
