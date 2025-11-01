@@ -544,6 +544,12 @@ class BTCTrader:
         
     def create_configuration_tab(self):
         """Create the configuration interface"""
+        # Store real API credentials
+        self.real_api_key = Config.COINBASE_API_KEY
+        self.real_api_secret = Config.COINBASE_API_SECRET
+        self.api_key_visible = False
+        self.api_secret_visible = False
+        
         # API Configuration Section
         api_frame = ttk.LabelFrame(self.config_tab, text="🔐 API Configuration", padding="15")
         api_frame.pack(fill=tk.X, padx=10, pady=10)
@@ -553,18 +559,20 @@ class BTCTrader:
         key_frame.pack(fill=tk.X, pady=5)
         ttk.Label(key_frame, text="API Key:", width=20).pack(side=tk.LEFT)
         self.api_key_var = tk.StringVar(value=self.mask_api_key(Config.COINBASE_API_KEY))
-        api_key_entry = ttk.Entry(key_frame, textvariable=self.api_key_var, width=40, show="*")
-        api_key_entry.pack(side=tk.LEFT, padx=5)
-        ttk.Button(key_frame, text="👁️", width=3, command=lambda: self.toggle_visibility(api_key_entry)).pack(side=tk.LEFT)
+        self.api_key_entry = ttk.Entry(key_frame, textvariable=self.api_key_var, width=40)
+        self.api_key_entry.pack(side=tk.LEFT, padx=5)
+        self.api_key_btn = ttk.Button(key_frame, text="👁️", width=3, command=self.toggle_api_key_visibility)
+        self.api_key_btn.pack(side=tk.LEFT)
         
         # API Secret
         secret_frame = ttk.Frame(api_frame)
         secret_frame.pack(fill=tk.X, pady=5)
         ttk.Label(secret_frame, text="API Secret:", width=20).pack(side=tk.LEFT)
         self.api_secret_var = tk.StringVar(value=self.mask_api_key(Config.COINBASE_API_SECRET))
-        api_secret_entry = ttk.Entry(secret_frame, textvariable=self.api_secret_var, width=40, show="*")
-        api_secret_entry.pack(side=tk.LEFT, padx=5)
-        ttk.Button(secret_frame, text="👁️", width=3, command=lambda: self.toggle_visibility(api_secret_entry)).pack(side=tk.LEFT)
+        self.api_secret_entry = ttk.Entry(secret_frame, textvariable=self.api_secret_var, width=40)
+        self.api_secret_entry.pack(side=tk.LEFT, padx=5)
+        self.api_secret_btn = ttk.Button(secret_frame, text="👁️", width=3, command=self.toggle_api_secret_visibility)
+        self.api_secret_btn.pack(side=tk.LEFT)
         
         # Trading Mode
         mode_frame = ttk.Frame(api_frame)
@@ -624,6 +632,15 @@ class BTCTrader:
         self.mode_status_var = tk.StringVar(value=mode_status_text)
         ttk.Label(status_frame, textvariable=self.mode_status_var, font=('Helvetica', 10)).pack(anchor='w', pady=2)
         
+        # Test Result Status (NEW)
+        self.test_result_var = tk.StringVar(value="")
+        self.test_result_label = ttk.Label(
+            status_frame,
+            textvariable=self.test_result_var,
+            font=('Helvetica', 11, 'bold')
+        )
+        self.test_result_label.pack(anchor='w', pady=5)
+        
         # Action Buttons
         button_frame = ttk.Frame(self.config_tab)
         button_frame.pack(fill=tk.X, padx=10, pady=15)
@@ -672,12 +689,25 @@ class BTCTrader:
             return "Not Set"
         return key[:4] + "*" * (len(key) - 8) + key[-4:]
     
-    def toggle_visibility(self, entry_widget):
-        """Toggle password visibility"""
-        if entry_widget.cget('show') == '*':
-            entry_widget.configure(show='')
+    def toggle_api_key_visibility(self):
+        """Toggle API Key visibility"""
+        self.api_key_visible = not self.api_key_visible
+        if self.api_key_visible:
+            self.api_key_var.set(self.real_api_key if self.real_api_key else "Not Set")
+            self.api_key_btn.configure(text="🙈")
         else:
-            entry_widget.configure(show='*')
+            self.api_key_var.set(self.mask_api_key(self.real_api_key))
+            self.api_key_btn.configure(text="👁️")
+    
+    def toggle_api_secret_visibility(self):
+        """Toggle API Secret visibility"""
+        self.api_secret_visible = not self.api_secret_visible
+        if self.api_secret_visible:
+            self.api_secret_var.set(self.real_api_secret if self.real_api_secret else "Not Set")
+            self.api_secret_btn.configure(text="🙈")
+        else:
+            self.api_secret_var.set(self.mask_api_key(self.real_api_secret))
+            self.api_secret_btn.configure(text="👁️")
     
     def save_configuration(self):
         """Save configuration to .env file"""
@@ -759,29 +789,54 @@ class BTCTrader:
             print(f"\n❌ Error reloading configuration: {e}")
     
     def test_api_connection(self):
-        """Test API connection"""
+        """Test API connection and show visual result"""
         try:
             print("\n🔄 Testing API connection...")
             
+            # Clear previous result
+            self.test_result_var.set("🔄 Testing connection...")
+            self.test_result_label.configure(foreground='blue')
+            self.root.update()
+            
             if not self.api.is_jwt_format:
                 print("❌ API not initialized (invalid credentials format)")
-                return
+                self.test_result_var.set("🔴 OFFLINE - Invalid credentials format")
+                self.test_result_label.configure(foreground='red')
+                self.api_status_var.set("Coinbase API: ❌ Not Connected")
+                return False
             
             # Try to get accounts
             accounts = self.api.list_accounts()
             
             if accounts and 'accounts' in accounts:
-                print(f"✅ API Connection Successful!")
-                print(f"   Found {len(accounts['accounts'])} accounts")
+                num_accounts = len(accounts['accounts'])
                 
-                # Update status
-                self.api_status_var.set("Coinbase API: ✅ Connected & Working")
+                if num_accounts > 0:
+                    print(f"✅ API Connection Successful!")
+                    print(f"   Found {num_accounts} accounts")
+                    
+                    # Update status - SUCCESS
+                    self.test_result_var.set(f"🟢 ONLINE - Connected ({num_accounts} accounts)")
+                    self.test_result_label.configure(foreground='green')
+                    self.api_status_var.set("Coinbase API: ✅ Connected & Working")
+                    return True
+                else:
+                    print("⚠️ API responded but no accounts found")
+                    self.test_result_var.set("🟡 PARTIAL - API responds but no accounts")
+                    self.test_result_label.configure(foreground='orange')
+                    return False
             else:
                 print("⚠️ API responded but no accounts found")
+                self.test_result_var.set("🟡 PARTIAL - API responds but no accounts")
+                self.test_result_label.configure(foreground='orange')
+                return False
                 
         except Exception as e:
             print(f"❌ API Connection Failed: {e}")
+            self.test_result_var.set(f"🔴 OFFLINE - Connection failed")
+            self.test_result_label.configure(foreground='red')
             self.api_status_var.set("Coinbase API: ❌ Connection Failed")
+            return False
         
     def toggle_auto_buy(self):
         """Enable/disable auto buy"""
