@@ -1,0 +1,202 @@
+pipeline {
+    agent any
+    
+    environment {
+        PYTHON_VERSION = '3.9'
+        PROJECT_NAME = 'BTC-Trading-Bot'
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                echo 'Checking out code from repository...'
+                checkout scm
+            }
+        }
+        
+        stage('Environment Setup') {
+            steps {
+                echo 'Setting up Python environment...'
+                script {
+                    if (isUnix()) {
+                        sh '''
+                            python3 --version
+                            pip3 install --upgrade pip
+                        '''
+                    } else {
+                        bat '''
+                            python --version
+                            pip install --upgrade pip
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('Install Dependencies') {
+            steps {
+                echo 'Installing project dependencies...'
+                script {
+                    if (isUnix()) {
+                        sh 'pip3 install -r requirements.txt'
+                        sh 'pip3 install pytest pytest-cov'
+                    } else {
+                        bat 'pip install -r requirements.txt'
+                        bat 'pip install pytest pytest-cov'
+                    }
+                }
+            }
+        }
+        
+        stage('Code Quality Checks') {
+            steps {
+                echo 'Running code quality checks...'
+                script {
+                    if (isUnix()) {
+                        sh '''
+                            pip3 install pylint flake8
+                            echo "Running pylint..."
+                            pylint btc_trader.py --exit-zero || true
+                            echo "Running flake8..."
+                            flake8 btc_trader.py --max-line-length=120 --exit-zero || true
+                        '''
+                    } else {
+                        bat '''
+                            pip install pylint flake8
+                            echo "Running pylint..."
+                            pylint btc_trader.py --exit-zero || exit 0
+                            echo "Running flake8..."
+                            flake8 btc_trader.py --max-line-length=120 --exit-zero || exit 0
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('Unit Tests - Calculations') {
+            steps {
+                echo 'Running calculation tests...'
+                script {
+                    if (isUnix()) {
+                        sh 'python3 -m pytest tests/test_calculations.py -v --tb=short'
+                    } else {
+                        bat 'python -m pytest tests/test_calculations.py -v --tb=short'
+                    }
+                }
+            }
+        }
+        
+        stage('Unit Tests - API') {
+            steps {
+                echo 'Running Coinbase API tests...'
+                script {
+                    if (isUnix()) {
+                        sh 'python3 -m pytest tests/test_coinbase_api.py -v --tb=short'
+                    } else {
+                        bat 'python -m pytest tests/test_coinbase_api.py -v --tb=short'
+                    }
+                }
+            }
+        }
+        
+        stage('Unit Tests - Trading Logic') {
+            steps {
+                echo 'Running trading logic tests...'
+                script {
+                    if (isUnix()) {
+                        sh 'python3 -m pytest tests/test_trading_logic.py -v --tb=short'
+                    } else {
+                        bat 'python -m pytest tests/test_trading_logic.py -v --tb=short'
+                    }
+                }
+            }
+        }
+        
+        stage('All Tests with Coverage') {
+            steps {
+                echo 'Running all tests with coverage report...'
+                script {
+                    if (isUnix()) {
+                        sh '''
+                            python3 -m pytest tests/ -v --cov=. --cov-report=html --cov-report=term
+                        '''
+                    } else {
+                        bat '''
+                            python -m pytest tests/ -v --cov=. --cov-report=html --cov-report=term
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('Integration Test') {
+            steps {
+                echo 'Running integration test...'
+                script {
+                    if (isUnix()) {
+                        sh 'python3 tests/run_all_tests.py'
+                    } else {
+                        bat 'python tests/run_all_tests.py'
+                    }
+                }
+            }
+        }
+        
+        stage('Security Scan') {
+            steps {
+                echo 'Running security scan...'
+                script {
+                    if (isUnix()) {
+                        sh '''
+                            pip3 install safety bandit
+                            echo "Checking dependencies for known vulnerabilities..."
+                            safety check --json || true
+                            echo "Running security analysis..."
+                            bandit -r . -f json || true
+                        '''
+                    } else {
+                        bat '''
+                            pip install safety bandit
+                            echo "Checking dependencies for known vulnerabilities..."
+                            safety check --json || exit 0
+                            echo "Running security analysis..."
+                            bandit -r . -f json || exit 0
+                        '''
+                    }
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            echo 'Cleaning up...'
+            // Archive test results
+            junit allowEmptyResults: true, testResults: '**/test-results/*.xml'
+            
+            // Archive coverage reports
+            publishHTML(target: [
+                allowMissing: true,
+                alwaysLinkToLastBuild: true,
+                keepAll: true,
+                reportDir: 'htmlcov',
+                reportFiles: 'index.html',
+                reportName: 'Coverage Report'
+            ])
+        }
+        
+        success {
+            echo '✅ All tests passed! Build successful.'
+            // Notify success (can add Slack, email, etc.)
+        }
+        
+        failure {
+            echo '❌ Tests failed! Build failed.'
+            // Notify failure (can add Slack, email, etc.)
+        }
+        
+        unstable {
+            echo '⚠️ Build is unstable.'
+        }
+    }
+}
