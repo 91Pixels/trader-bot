@@ -49,6 +49,7 @@ pipeline {
                             git config user.email "jenkins@bot.com"
                             git config user.name "Jenkins Bot"
                             git checkout dev || git checkout -b dev
+                            git pull origin dev --rebase || echo "Already up to date"
                             git add .
                             git commit -m "Jenkins: Build #${BUILD_NUMBER} - Auto merge to dev" || echo "No changes to commit"
                             git push https://%GIT_USERNAME%:%GIT_PASSWORD%@github.com/91Pixels/trader-bot.git dev
