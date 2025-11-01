@@ -1,6 +1,14 @@
 # BTC Trading Strategy Bot
 
+[![Tests](https://github.com/91Pixels/trader-bot/actions/workflows/pr-validation.yml/badge.svg)](https://github.com/91Pixels/trader-bot/actions/workflows/pr-validation.yml)
+[![Coverage](https://img.shields.io/badge/coverage-57%25-yellow)](https://github.com/91Pixels/trader-bot)
+[![Tests Passing](https://img.shields.io/badge/tests-118%20passing-brightgreen)](https://github.com/91Pixels/trader-bot)
+
 A Python-based BTC/USD trading strategy simulator with GUI interface using Coinbase price data.
+
+## ✅ CI/CD Pipeline
+
+Este proyecto incluye **validación automática de tests** antes de cada merge a `main`. Ver documentación completa en [`docs/CI_CD_README.md`](docs/CI_CD_README.md).
 
 ## Features
 
