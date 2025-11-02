@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 import requests
 import threading
 import time
@@ -7,6 +7,8 @@ from datetime import datetime
 import os
 from coinbase_complete_api import CoinbaseCompleteAPI
 from config import Config
+from websocket_price_feed import CoinbaseWebSocketFeed
+from database import TradingDatabase
 
 class BTCTrader:
     def __init__(self):
@@ -31,10 +33,11 @@ class BTCTrader:
         if Config.is_live_mode() and self.api.is_jwt_format:
             self.load_real_balance()
         
-        # Strategy parameters
-        self.profit_rate = 0.015   # 1.5% net profit target
+        # Strategy parameters - ALWAYS START WITH THESE VALUES
+        self.profit_rate = 0.025   # ALWAYS 2.5% net profit target
         self.stop_loss = 1.0      # 1.0% stop loss
-        self.position_size = 100.0 # $100 per trade
+        self.position_size = 5.0  # ALWAYS $5 per trade by default
+        self.min_position_size = 5.0  # Minimum $5 per trade
         self.buy_fee_rate = 0.006 # 0.6% buy fee
         self.sell_fee_rate = 0.006 # 0.6% sell fee
         self.rebuy_drop = 2.0     # 2.0% price drop for rebuy in auto-loop
@@ -65,8 +68,269 @@ class BTCTrader:
         # Entry price variable (used internally, not displayed)
         self.entry_price_var = None
         
+        # WebSocket price feed
+        self.websocket_feed = None
+        self.use_websocket = True  # Use WebSocket by default
+        self.websocket_latency_ms = 0
+        self.rest_latency_ms = 0
+        self.last_price_update_time = 0
+        
+        # Price validation settings
+        self.max_price_age_seconds = 2.0  # Price older than 2s is stale
+        self.max_price_deviation_pct = 0.3  # Max 0.3% price change allowed
+        
+        # Initialize database
+        self.db = TradingDatabase("trading_bot.db")
+        
+        # Restore previous session if exists
+        self.restore_session()
+        
         # Create GUI elements
         self.create_gui()
+        
+        # Register cleanup on window close
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+    
+    def restore_session(self):
+        """Restore previous session from database"""
+        try:
+            # Restore statistics
+            stats = self.db.get_latest_statistics()
+            if stats:
+                self.trades_count = stats['total_trades']
+                self.winning_trades = stats['winning_trades']
+                self.total_profit = stats['total_profit']
+                print(f"\n✅ Statistics restored: {self.trades_count} trades, ${self.total_profit:+.2f} profit")
+            
+            # Restore active session (open position)
+            session = self.db.get_active_session()
+            if session and session['btc_amount'] > 0:
+                self.last_buy_price = session['last_buy_price']
+                self.position_size = session['position_size']
+                # Note: balance_btc will be loaded from Coinbase
+                print(f"\n🔄 Active position restored:")
+                print(f"   Buy Price: ${self.last_buy_price:,.2f}")
+                print(f"   Position Size: ${self.position_size:.2f}")
+                print(f"   Target: ${session['target_price']:,.2f}")
+                print(f"   Stop Loss: ${session['stop_loss']:,.2f}")
+        except Exception as e:
+            print(f"⚠️ Could not restore session: {e}")
+    
+    def on_closing(self):
+        """Clean up before closing application"""
+        try:
+            print("\n🔄 Saving state before closing...")
+            
+            # Save current statistics
+            win_rate = (self.winning_trades / self.trades_count * 100) if self.trades_count > 0 else 0
+            roi = (self.total_profit / 1000 * 100) if self.total_profit != 0 else 0
+            self.db.save_statistics(
+                self.trades_count,
+                self.winning_trades,
+                self.total_profit,
+                win_rate,
+                roi
+            )
+            
+            # Close database connection
+            self.db.close()
+            
+            # Stop WebSocket
+            if self.websocket_feed:
+                self.websocket_feed.disconnect()
+            
+            print("✅ State saved successfully")
+        except Exception as e:
+            print(f"⚠️ Error during cleanup: {e}")
+        finally:
+            self.root.destroy()
+    
+    # Help/Tooltip methods
+    def show_help_price(self):
+        """Show help for Live BTC Price section"""
+        messagebox.showinfo(
+            "📊 Ayuda: Live BTC Price",
+            "PRECIO EN TIEMPO REAL\n\n"
+            "🎯 Qué hace:\n"
+            "• Muestra el precio actual de BTC en USD\n"
+            "• Se actualiza automáticamente en tiempo real\n"
+            "• Usa WebSocket para latencia mínima (<50ms)\n\n"
+            "📡 Latencia:\n"
+            "• WebSocket ⚡: <50ms (Excelente)\n"
+            "• REST API 📱: 300-800ms (Fallback)\n\n"
+            "✅ WebSocket Conectado: Precio real-time\n"
+            "⚠️ REST API: Fallback si WebSocket falla\n\n"
+            "💡 Tip:\n"
+            "Latencia baja = Precio más preciso = Menos riesgo de slippage"
+        )
+    
+    def show_help_trading_settings(self):
+        """Show help for Trading Settings section"""
+        messagebox.showinfo(
+            "⚙️ Ayuda: Trading Settings",
+            "CONFIGURACIÓN DE TRADING\n\n"
+            "🎯 Profit Target (%):\n"
+            "• Ganancia objetivo por trade\n"
+            "• Recomendado: ≥2.5%\n"
+            "• Ejemplo: 2.5% = $0.25 por cada $10\n"
+            "• Incluye margen para cubrir fees (1.2%)\n\n"
+            "🛡️ Dry Run (Test Mode):\n"
+            "• ✅ ACTIVO: Simula trades sin dinero real\n"
+            "• ❌ DESACTIVO: Ejecuta trades reales (LIVE)\n"
+            "• Siempre prueba en DRY RUN primero\n\n"
+            "🛑 Stop Loss (%):\n"
+            "• Pérdida máxima aceptable\n"
+            "• Default: 1.0% = -$0.10 por cada $10\n"
+            "• Protección automática contra caídas\n\n"
+            "🔄 Rebuy Drop (%):\n"
+            "• % que debe bajar precio para recomprar\n"
+            "• Solo en auto-loop mode\n"
+            "• Ejemplo: 2% = recompra si baja $2,200"
+        )
+    
+    def show_help_auto_buy(self):
+        """Show help for Auto Buy section"""
+        messagebox.showinfo(
+            "🤖 Ayuda: Auto Buy Configuration",
+            "COMPRA AUTOMÁTICA\n\n"
+            "🎯 Qué hace:\n"
+            "• Compra automáticamente cuando precio alcanza trigger\n"
+            "• Se ejecuta UNA VEZ y se desactiva\n"
+            "• Útil para comprar en precio objetivo\n\n"
+            "⚙️ Configuración:\n"
+            "1. ☑ Enable Auto Buy: Activar/Desactivar\n"
+            "2. Buy Price: Precio trigger ($)\n"
+            "3. 'Set Current -1%': Usa precio actual -1%\n\n"
+            "📊 Estados:\n"
+            "• ⚫ ACTIVE: Esperando precio trigger\n"
+            "• ✅ EXECUTED: Ya se ejecutó (desactivado)\n"
+            "• ⚪ DISABLED: No activo\n\n"
+            "💡 Ejemplo:\n"
+            "Precio actual: $110,000\n"
+            "Tu trigger: $108,000\n"
+            "→ Cuando baje a $108K, compra automáticamente\n\n"
+            "⚠️ Importante:\n"
+            "• Solo se ejecuta UNA VEZ\n"
+            "• Requiere balance USD disponible (LIVE mode)\n"
+            "• En DRY RUN: sin límite de balance"
+        )
+    
+    def show_help_auto_sell(self):
+        """Show help for Auto Sell section"""
+        messagebox.showinfo(
+            "💰 Ayuda: Auto Sell Configuration",
+            "VENTA AUTOMÁTICA\n\n"
+            "🎯 Qué hace:\n"
+            "• Vende automáticamente cuando precio alcanza target\n"
+            "• Se ejecuta UNA VEZ y se desactiva\n"
+            "• Útil para tomar ganancias automáticamente\n\n"
+            "⚙️ Configuración:\n"
+            "1. ☑ Enable Auto Sell: Activar/Desactivar\n"
+            "2. Sell Price: Precio target ($)\n"
+            "3. 'Use Target Price': Usa target calculado\n"
+            "4. 'Update': Recalcula con precio actual\n\n"
+            "📊 Estados:\n"
+            "• ⚫ ACTIVE: Esperando precio target\n"
+            "• ✅ EXECUTED: Ya se ejecutó (desactivado)\n"
+            "• ⚪ DISABLED: No activo\n\n"
+            "💡 Ejemplo:\n"
+            "Compraste a: $110,000\n"
+            "Target auto: $114,084 (+3.7% para 2.5% neto)\n"
+            "→ Cuando suba a $114K, vende automáticamente\n\n"
+            "✅ Ventajas:\n"
+            "• No necesitas estar monitoreando\n"
+            "• Toma ganancias automáticamente\n"
+            "• Ejecuta al precio exacto"
+        )
+    
+    def show_help_position(self):
+        """Show help for Position Calculator section"""
+        messagebox.showinfo(
+            "📊 Ayuda: Current Position & Profit Calculator",
+            "CALCULADORA DE POSICIÓN\n\n"
+            "🎯 Qué hace:\n"
+            "• Muestra tu posición actual\n"
+            "• Calcula profit/loss en tiempo real\n"
+            "• Muestra precios target y stop loss\n\n"
+            "📊 Información mostrada:\n"
+            "• Entry: Precio de compra\n"
+            "• Current: Precio actual\n"
+            "• Initial Investment: Monto invertido\n"
+            "• Current BTC Value: Valor actual de tu BTC\n"
+            "• Current P/L: Ganancia/Pérdida actual\n\n"
+            "🎯 TARGET PRICE:\n"
+            "• Precio para alcanzar profit objetivo\n"
+            "• Incluye fees de compra y venta\n"
+            "• Ejemplo: $114,084 (+3.7% bruto, 2.5% neto)\n\n"
+            "🛑 STOP LOSS:\n"
+            "• Precio para limitar pérdidas\n"
+            "• Ejemplo: $108,914 (-1%)\n\n"
+            "💡 Cómo leer:\n"
+            "• Verde: En ganancia\n"
+            "• Rojo: En pérdida\n"
+            "• Actual P/L: Ganancia si vendieras AHORA\n\n"
+            "✅ Fórmula Target:\n"
+            "Target = Entry × (1 + Profit% + Fees%)"
+        )
+    
+    def show_help_balance(self):
+        """Show help for Account Balance section"""
+        messagebox.showinfo(
+            "💰 Ayuda: Account (Real Balance from Coinbase)",
+            "BALANCE DE CUENTA\n\n"
+            "🎯 Qué hace:\n"
+            "• Muestra tu balance REAL de Coinbase\n"
+            "• Se actualiza al iniciar el programa\n"
+            "• Conecta con Coinbase API\n\n"
+            "📊 Información:\n"
+            "• USD: Dólares disponibles\n"
+            "• BTC: Bitcoin disponible\n"
+            "• Cantidad exacta con 8 decimales\n\n"
+            "🔄 Refresh Balance:\n"
+            "• Actualiza balance desde Coinbase\n"
+            "• Útil después de hacer trades externos\n"
+            "• Tarda ~2 segundos\n\n"
+            "✅ Connected to Coinbase:\n"
+            "• Verde: API conectada correctamente\n"
+            "• Rojo: Error de conexión\n\n"
+            "⚠️ En DRY RUN:\n"
+            "• Muestra balance real\n"
+            "• Pero trades NO lo modifican\n"
+            "• Balance simulado para testing\n\n"
+            "💡 En LIVE:\n"
+            "• Balance real se usa\n"
+            "• Se actualiza después de cada trade\n"
+            "• Sincronizado con Coinbase"
+        )
+    
+    def show_help_statistics(self):
+        """Show help for Statistics section"""
+        messagebox.showinfo(
+            "📊 Ayuda: Statistics",
+            "ESTADÍSTICAS DE TRADING\n\n"
+            "🎯 Qué muestra:\n"
+            "• Trades: Número total de operaciones\n"
+            "• Win: % de trades ganadores\n"
+            "• Profit: Ganancia/Pérdida total\n"
+            "• ROI: Return on Investment (%)\n\n"
+            "📈 Cálculos:\n"
+            "• Win Rate = (Wins / Total) × 100\n"
+            "• Total Profit = Suma de todos los P/L\n"
+            "• ROI = (Profit / Capital Inicial) × 100\n\n"
+            "💡 Ejemplo:\n"
+            "Trades: 5\n"
+            "Win: 80% (4 de 5 ganadores)\n"
+            "Profit: +$1.25\n"
+            "ROI: +0.13%\n\n"
+            "✅ Buenas métricas:\n"
+            "• Win Rate: >60%\n"
+            "• ROI: >0% (positivo)\n"
+            "• Profit consistente\n\n"
+            "📊 Se actualiza:\n"
+            "• Después de cada trade completado\n"
+            "• En tiempo real\n"
+            "• Solo cuenta trades completados (buy+sell)"
+        )
         
     def load_real_balance(self):
         """Load real balance from Coinbase"""
@@ -199,16 +463,60 @@ class BTCTrader:
         # Initialize entry_price_var (used internally, not displayed)
         self.entry_price_var = tk.StringVar(value="0")
         
+        # Create Header Frame with Logo
+        header_frame = ttk.Frame(self.root)
+        header_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        # Try to load and display logo
+        try:
+            from PIL import Image, ImageTk
+            import os
+            
+            logo_path = os.path.join(os.path.dirname(__file__), "assets", "bot_logo.png")
+            if os.path.exists(logo_path):
+                # Load and resize logo to 90x90px
+                logo_img = Image.open(logo_path)
+                logo_img = logo_img.resize((90, 90), Image.Resampling.LANCZOS)
+                self.logo_photo = ImageTk.PhotoImage(logo_img)
+                
+                # Display logo on the right side
+                logo_label = tk.Label(header_frame, image=self.logo_photo)
+                logo_label.pack(side=tk.RIGHT, padx=10)
+                
+                # Title on the left
+                title_label = tk.Label(
+                    header_frame, 
+                    text="🤖 BTC Trading Bot", 
+                    font=('Helvetica', 16, 'bold')
+                )
+                title_label.pack(side=tk.LEFT, padx=10)
+        except Exception as e:
+            # If logo fails to load, just show title
+            title_label = tk.Label(
+                header_frame, 
+                text="🤖 BTC Trading Bot", 
+                font=('Helvetica', 16, 'bold')
+            )
+            title_label.pack(side=tk.LEFT, padx=10)
+            print(f"⚠️ Could not load logo: {e}")
+        
         # Create Notebook (Tab Container)
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # Create tabs
-        self.trading_tab = ttk.Frame(self.notebook)
-        self.config_tab = ttk.Frame(self.notebook)
+        # Create tabs with scrollable frames
+        self.trading_tab_container = ttk.Frame(self.notebook)
+        self.config_tab_container = ttk.Frame(self.notebook)
+        self.testing_tab_container = ttk.Frame(self.notebook)
         
-        self.notebook.add(self.trading_tab, text='📊 Trading')
-        self.notebook.add(self.config_tab, text='⚙️ Configuration')
+        self.notebook.add(self.trading_tab_container, text='📊 Trading')
+        self.notebook.add(self.config_tab_container, text='⚙️ Configuration')
+        self.notebook.add(self.testing_tab_container, text='🧪 Buying Testing')
+        
+        # Create scrollable frames for each tab
+        self.trading_tab = self.create_scrollable_frame(self.trading_tab_container)
+        self.config_tab = self.create_scrollable_frame(self.config_tab_container)
+        self.testing_tab = self.create_scrollable_frame(self.testing_tab_container)
         
         # Create Trading Tab Content
         self.create_trading_tab()
@@ -216,11 +524,57 @@ class BTCTrader:
         # Create Configuration Tab Content
         self.create_configuration_tab()
         
+        # Create Buying Testing Tab Content
+        self.create_buying_testing_tab()
+    
+    def create_scrollable_frame(self, parent):
+        """Create a scrollable frame inside a parent container"""
+        # Create canvas
+        canvas = tk.Canvas(parent, highlightthickness=0)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Create scrollbar
+        scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=canvas.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Configure canvas
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Create frame inside canvas
+        scrollable_frame = ttk.Frame(canvas)
+        canvas_frame = canvas.create_window((0, 0), window=scrollable_frame, anchor='nw')
+        
+        # Update scroll region when frame size changes
+        def on_frame_configure(event):
+            canvas.configure(scrollregion=canvas.bbox('all'))
+        
+        scrollable_frame.bind('<Configure>', on_frame_configure)
+        
+        # Update canvas window width when canvas size changes
+        def on_canvas_configure(event):
+            canvas.itemconfig(canvas_frame, width=event.width)
+        
+        canvas.bind('<Configure>', on_canvas_configure)
+        
+        # Enable mouse wheel scrolling
+        def on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        
+        canvas.bind_all('<MouseWheel>', on_mousewheel)
+        
+        return scrollable_frame
+        
     def create_trading_tab(self):
         """Create the main trading interface"""
-        # Price Display
-        price_frame = ttk.LabelFrame(self.trading_tab, text="Live BTC Price", padding="10")
-        price_frame.pack(fill=tk.X, padx=10, pady=5)
+        # Price Display with help button
+        price_container = ttk.Frame(self.trading_tab)
+        price_container.pack(fill=tk.X, padx=10, pady=5)
+        
+        price_frame = ttk.LabelFrame(price_container, text="Live BTC Price", padding="10")
+        price_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        help_btn_price = ttk.Button(price_container, text="?", width=3, command=self.show_help_price)
+        help_btn_price.pack(side=tk.RIGHT, padx=(5,0))
         
         self.price_var = tk.StringVar(value="$0.00")
         ttk.Label(
@@ -247,15 +601,30 @@ class BTCTrader:
             foreground='blue'
         ).pack()
         
-        # Trading Settings
-        self.settings_frame = ttk.LabelFrame(self.trading_tab, text="Trading Settings", padding="10")
-        self.settings_frame.pack(fill=tk.X, padx=10, pady=5)
+        # Latency indicator
+        self.latency_var = tk.StringVar(value="📡 Latency: -- ms | Source: --")
+        ttk.Label(
+            price_frame,
+            textvariable=self.latency_var,
+            font=('Helvetica', 8),
+            foreground='green'
+        ).pack()
         
-        # Profit target setting
+        # Trading Settings with help button
+        settings_container = ttk.Frame(self.trading_tab)
+        settings_container.pack(fill=tk.X, padx=10, pady=5)
+        
+        self.settings_frame = ttk.LabelFrame(settings_container, text="Trading Settings", padding="10")
+        self.settings_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        help_btn_settings = ttk.Button(settings_container, text="?", width=3, command=self.show_help_trading_settings)
+        help_btn_settings.pack(side=tk.RIGHT, padx=(5,0))
+        
+        # Profit target setting - ALWAYS 2.5%
         profit_frame = ttk.Frame(self.settings_frame)
         profit_frame.pack(fill=tk.X, pady=2)
         ttk.Label(profit_frame, text="Profit Target (%):").pack(side=tk.LEFT)
-        self.profit_var = tk.StringVar(value="1.5")
+        self.profit_var = tk.StringVar(value="2.5")
         ttk.Entry(profit_frame, textvariable=self.profit_var, width=10).pack(side=tk.LEFT, padx=5)
         
         # Trading mode
@@ -287,9 +656,15 @@ class BTCTrader:
             command=self.apply_settings
         ).pack(pady=5)
         
-        # Auto Buy Section
-        autobuy_frame = ttk.LabelFrame(self.trading_tab, text="🤖 Auto Buy Configuration", padding="10")
-        autobuy_frame.pack(fill=tk.X, padx=10, pady=5)
+        # Auto Buy Section with help button
+        autobuy_container = ttk.Frame(self.trading_tab)
+        autobuy_container.pack(fill=tk.X, padx=10, pady=5)
+        
+        autobuy_frame = ttk.LabelFrame(autobuy_container, text="🤖 Auto Buy Configuration", padding="10")
+        autobuy_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        help_btn_autobuy = ttk.Button(autobuy_container, text="?", width=3, command=self.show_help_auto_buy)
+        help_btn_autobuy.pack(side=tk.RIGHT, padx=(5,0))
         
         # Enable Auto Buy checkbox
         enable_frame = ttk.Frame(autobuy_frame)
@@ -325,9 +700,15 @@ class BTCTrader:
             font=('Helvetica', 9, 'bold')
         ).pack(pady=5)
         
-        # Auto Sell Section
-        autosell_frame = ttk.LabelFrame(self.trading_tab, text="🤖 Auto Sell Configuration", padding="10")
-        autosell_frame.pack(fill=tk.X, padx=10, pady=5)
+        # Auto Sell Section with help button
+        autosell_container = ttk.Frame(self.trading_tab)
+        autosell_container.pack(fill=tk.X, padx=10, pady=5)
+        
+        autosell_frame = ttk.LabelFrame(autosell_container, text="🤖 Auto Sell Configuration", padding="10")
+        autosell_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        help_btn_autosell = ttk.Button(autosell_container, text="?", width=3, command=self.show_help_auto_sell)
+        help_btn_autosell.pack(side=tk.RIGHT, padx=(5,0))
         
         # Enable Auto Sell checkbox
         sell_enable_frame = ttk.Frame(autosell_frame)
@@ -370,9 +751,15 @@ class BTCTrader:
             font=('Helvetica', 9, 'bold')
         ).pack(pady=5)
         
-        # Position Information
-        position_frame = ttk.LabelFrame(self.trading_tab, text="Current Position & Profit Calculator", padding="10")
-        position_frame.pack(fill=tk.X, padx=10, pady=5)
+        # Position Information with help button
+        position_container = ttk.Frame(self.trading_tab)
+        position_container.pack(fill=tk.X, padx=10, pady=5)
+        
+        position_frame = ttk.LabelFrame(position_container, text="Current Position & Profit Calculator", padding="10")
+        position_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        help_btn_position = ttk.Button(position_container, text="?", width=3, command=self.show_help_position)
+        help_btn_position.pack(side=tk.RIGHT, padx=(5,0))
         
         # Entry Price and Status
         self.entry_var = tk.StringVar(value="No Position")
@@ -453,10 +840,16 @@ class BTCTrader:
             foreground='gray'
         ).pack()
         
-        # Account Information
+        # Account Information with help button
+        account_container = ttk.Frame(self.trading_tab)
+        account_container.pack(fill=tk.X, padx=10, pady=5)
+        
         account_title = "Account (Real Balance from Coinbase)" if self.using_real_balance else "Account (Mock Balance)"
-        account_frame = ttk.LabelFrame(self.trading_tab, text=account_title, padding="10")
-        account_frame.pack(fill=tk.X, padx=10, pady=5)
+        account_frame = ttk.LabelFrame(account_container, text=account_title, padding="10")
+        account_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        help_btn_balance = ttk.Button(account_container, text="?", width=3, command=self.show_help_balance)
+        help_btn_balance.pack(side=tk.RIGHT, padx=(5,0))
         
         self.balance_var = tk.StringVar(
             value=f"USD: ${self.balance_usd:.2f}\nBTC: {self.balance_btc:.8f}"
@@ -512,9 +905,15 @@ class BTCTrader:
                 foreground='blue'
             ).pack()
         
-        # Statistics
-        stats_frame = ttk.LabelFrame(self.trading_tab, text="Statistics", padding="10")
-        stats_frame.pack(fill=tk.X, padx=10, pady=5)
+        # Statistics with help button
+        stats_container = ttk.Frame(self.trading_tab)
+        stats_container.pack(fill=tk.X, padx=10, pady=5)
+        
+        stats_frame = ttk.LabelFrame(stats_container, text="Statistics", padding="10")
+        stats_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        help_btn_stats = ttk.Button(stats_container, text="?", width=3, command=self.show_help_statistics)
+        help_btn_stats.pack(side=tk.RIGHT, padx=(5,0))
         
         self.stats_var = tk.StringVar(value="No trades yet")
         ttk.Label(
@@ -542,6 +941,418 @@ class BTCTrader:
         )
         self.buy_button.pack(side=tk.LEFT, padx=5)
         
+    def create_buying_testing_tab(self):
+        """Create the manual buying/selling testing interface"""
+        # Title and description
+        header_frame = ttk.Frame(self.testing_tab)
+        header_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        ttk.Label(
+            header_frame,
+            text="🧪 Manual Buying & Selling Test Center",
+            font=('Helvetica', 14, 'bold')
+        ).pack()
+        
+        ttk.Label(
+            header_frame,
+            text="Test buy and sell operations manually with custom parameters",
+            font=('Helvetica', 9),
+            foreground='gray'
+        ).pack()
+        
+        # Current Price Display
+        price_frame = ttk.LabelFrame(self.testing_tab, text="Current Market Price", padding="10")
+        price_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        self.test_price_var = tk.StringVar(value="$0.00")
+        ttk.Label(
+            price_frame,
+            textvariable=self.test_price_var,
+            font=('Helvetica', 20, 'bold'),
+            foreground='blue'
+        ).pack()
+        
+        # Manual Buy Section
+        buy_frame = ttk.LabelFrame(self.testing_tab, text="💰 Manual Buy Test", padding="15")
+        buy_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Buy amount input
+        buy_amount_frame = ttk.Frame(buy_frame)
+        buy_amount_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(buy_amount_frame, text="Amount to Buy (USD):", width=20).pack(side=tk.LEFT)
+        self.test_buy_amount_var = tk.StringVar(value="100.00")
+        ttk.Entry(buy_amount_frame, textvariable=self.test_buy_amount_var, width=15).pack(side=tk.LEFT, padx=5)
+        
+        # Buy price input (optional - use market price if 0)
+        buy_price_frame = ttk.Frame(buy_frame)
+        buy_price_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(buy_price_frame, text="Buy Price (0=Market):", width=20).pack(side=tk.LEFT)
+        self.test_buy_price_var = tk.StringVar(value="0")
+        ttk.Entry(buy_price_frame, textvariable=self.test_buy_price_var, width=15).pack(side=tk.LEFT, padx=5)
+        ttk.Button(
+            buy_price_frame,
+            text="Use Market Price",
+            command=self.set_test_market_price_buy
+        ).pack(side=tk.LEFT, padx=5)
+        
+        # Buy mode selection
+        buy_mode_frame = ttk.Frame(buy_frame)
+        buy_mode_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(buy_mode_frame, text="Execution Mode:", width=20).pack(side=tk.LEFT)
+        self.test_buy_mode_var = tk.BooleanVar(value=True)
+        ttk.Radiobutton(buy_mode_frame, text="DRY RUN", variable=self.test_buy_mode_var, value=True).pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(buy_mode_frame, text="LIVE", variable=self.test_buy_mode_var, value=False).pack(side=tk.LEFT, padx=5)
+        
+        # Execute Buy button
+        ttk.Button(
+            buy_frame,
+            text="🛒 Execute Test Buy",
+            command=self.execute_test_buy,
+            style='Accent.TButton'
+        ).pack(pady=10)
+        
+        # Buy result display
+        self.test_buy_result_var = tk.StringVar(value="No buy test executed yet")
+        ttk.Label(
+            buy_frame,
+            textvariable=self.test_buy_result_var,
+            font=('Helvetica', 9),
+            foreground='blue',
+            wraplength=550,
+            justify='left'
+        ).pack(pady=5)
+        
+        ttk.Separator(self.testing_tab, orient='horizontal').pack(fill=tk.X, padx=10, pady=10)
+        
+        # Manual Sell Section
+        sell_frame = ttk.LabelFrame(self.testing_tab, text="💵 Manual Sell Test", padding="15")
+        sell_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Sell amount input (BTC)
+        sell_amount_frame = ttk.Frame(sell_frame)
+        sell_amount_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(sell_amount_frame, text="Amount to Sell (BTC):", width=20).pack(side=tk.LEFT)
+        self.test_sell_amount_var = tk.StringVar(value="0.001")
+        ttk.Entry(sell_amount_frame, textvariable=self.test_sell_amount_var, width=15).pack(side=tk.LEFT, padx=5)
+        ttk.Button(
+            sell_amount_frame,
+            text="Use All BTC",
+            command=self.set_test_all_btc
+        ).pack(side=tk.LEFT, padx=5)
+        
+        # Sell price input (optional - use market price if 0)
+        sell_price_frame = ttk.Frame(sell_frame)
+        sell_price_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(sell_price_frame, text="Sell Price (0=Market):", width=20).pack(side=tk.LEFT)
+        self.test_sell_price_var = tk.StringVar(value="0")
+        ttk.Entry(sell_price_frame, textvariable=self.test_sell_price_var, width=15).pack(side=tk.LEFT, padx=5)
+        ttk.Button(
+            sell_price_frame,
+            text="Use Market Price",
+            command=self.set_test_market_price_sell
+        ).pack(side=tk.LEFT, padx=5)
+        
+        # Sell mode selection
+        sell_mode_frame = ttk.Frame(sell_frame)
+        sell_mode_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(sell_mode_frame, text="Execution Mode:", width=20).pack(side=tk.LEFT)
+        self.test_sell_mode_var = tk.BooleanVar(value=True)
+        ttk.Radiobutton(sell_mode_frame, text="DRY RUN", variable=self.test_sell_mode_var, value=True).pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(sell_mode_frame, text="LIVE", variable=self.test_sell_mode_var, value=False).pack(side=tk.LEFT, padx=5)
+        
+        # Execute Sell button
+        ttk.Button(
+            sell_frame,
+            text="💰 Execute Test Sell",
+            command=self.execute_test_sell,
+            style='Accent.TButton'
+        ).pack(pady=10)
+        
+        # Sell result display
+        self.test_sell_result_var = tk.StringVar(value="No sell test executed yet")
+        ttk.Label(
+            sell_frame,
+            textvariable=self.test_sell_result_var,
+            font=('Helvetica', 9),
+            foreground='blue',
+            wraplength=550,
+            justify='left'
+        ).pack(pady=5)
+        
+        # Current Test Balance Display
+        balance_frame = ttk.LabelFrame(self.testing_tab, text="Current Balance", padding="10")
+        balance_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        self.test_balance_display_var = tk.StringVar(
+            value=f"USD: ${self.balance_usd:.2f}  |  BTC: {self.balance_btc:.8f}"
+        )
+        ttk.Label(
+            balance_frame,
+            textvariable=self.test_balance_display_var,
+            font=('Helvetica', 11, 'bold')
+        ).pack()
+        
+        # Warning notice
+        warning_frame = ttk.Frame(self.testing_tab)
+        warning_frame.pack(fill=tk.X, padx=10, pady=10)
+        
+        ttk.Label(
+            warning_frame,
+            text="⚠️ WARNING: LIVE mode will execute real orders on Coinbase. Always test with DRY RUN first!",
+            font=('Helvetica', 9, 'bold'),
+            foreground='red',
+            wraplength=550,
+            justify='center'
+        ).pack()
+    
+    def set_test_market_price_buy(self):
+        """Set buy price to current market price"""
+        if self.current_price > 0:
+            self.test_buy_price_var.set(f"{self.current_price:.2f}")
+        else:
+            print("⚠️ Waiting for price data...")
+    
+    def set_test_market_price_sell(self):
+        """Set sell price to current market price"""
+        if self.current_price > 0:
+            self.test_sell_price_var.set(f"{self.current_price:.2f}")
+        else:
+            print("⚠️ Waiting for price data...")
+    
+    def set_test_all_btc(self):
+        """Set sell amount to all available BTC"""
+        self.test_sell_amount_var.set(f"{self.balance_btc:.8f}")
+    
+    def execute_test_buy(self):
+        """Execute a test buy order"""
+        try:
+            # Get parameters
+            buy_amount = float(self.test_buy_amount_var.get())
+            buy_price_str = self.test_buy_price_var.get().replace(',', '').replace('$', '')
+            buy_price = float(buy_price_str) if buy_price_str and buy_price_str != '0' else self.current_price
+            is_dry_run = self.test_buy_mode_var.get()
+            
+            # Validate
+            if buy_amount <= 0:
+                self.test_buy_result_var.set("❌ Error: Buy amount must be positive")
+                return
+            
+            if buy_price <= 0:
+                self.test_buy_result_var.set("❌ Error: Invalid price. Start monitoring to get market price.")
+                return
+            
+            # Validate minimum amount ($5)
+            if buy_amount < self.min_position_size:
+                self.test_buy_result_var.set(f"❌ Error: Minimum buy amount is ${self.min_position_size:.2f}. You tried ${buy_amount:.2f}")
+                print(f"\n❌ Buy amount too small! Minimum is ${self.min_position_size:.2f}, you tried ${buy_amount:.2f}")
+                return
+            
+            # In DRY RUN mode: Skip balance validation (use simulated balance)
+            # In LIVE mode: Validate only if not using payment method
+            if is_dry_run:
+                # DRY RUN: No balance check, simulate unlimited funds
+                print(f"\n💡 DRY RUN MODE: Using simulated balance (no real funds needed)")
+            else:
+                # LIVE mode: Will use Coinbase payment method (card) if insufficient balance
+                print(f"\n🔴 LIVE MODE: Will attempt purchase with Coinbase payment method if needed")
+                if buy_amount > self.balance_usd:
+                    print(f"   ℹ️ Insufficient wallet balance (${self.balance_usd:.2f})")
+                    print(f"   💳 Will use attached payment method for ${buy_amount:.2f}")
+            
+            # Calculate
+            buy_fee = buy_amount * self.buy_fee_rate
+            net_investment = buy_amount - buy_fee
+            btc_amount = net_investment / buy_price
+            
+            mode_str = "DRY RUN" if is_dry_run else "LIVE"
+            
+            # FASE 3: Validate price before LIVE execution
+            if not is_dry_run:
+                print(f"\n🔍 Validating price before test buy order...")
+                is_valid, validated_price, error_msg = self.validate_price_before_execution(buy_price, "TEST BUY")
+                
+                if not is_valid:
+                    self.test_buy_result_var.set(f"{error_msg}\n⚠️ Order cancelled")
+                    print(error_msg)
+                    print(f"⚠️ TEST BUY ORDER CANCELLED - Price validation failed")
+                    return
+                
+                # Use validated price
+                buy_price = validated_price
+                btc_amount = net_investment / buy_price
+            
+            # Execute real order if LIVE mode
+            if not is_dry_run:
+                from trading_helpers import TradingHelpers
+                helpers = TradingHelpers()
+                
+                print(f"\n🔴 EXECUTING REAL TEST BUY ORDER...")
+                print(f"   Amount: ${buy_amount:.2f}")
+                print(f"   Price: ${buy_price:,.2f}")
+                print(f"   💳 Using Coinbase payment method (card/bank)")
+                
+                result = helpers.buy_btc_market(usd_amount=buy_amount)
+                
+                if not result.get('success'):
+                    error_msg = result.get('error', 'Unknown error')
+                    self.test_buy_result_var.set(f"❌ REAL BUY FAILED: {error_msg}")
+                    print(f"❌ REAL TEST BUY FAILED: {error_msg}")
+                    return
+                
+                print(f"✅ REAL TEST BUY EXECUTED: Order ID {result.get('order_id')}")
+                
+                # In LIVE mode, refresh balance from Coinbase after purchase
+                print(f"🔄 Refreshing balance from Coinbase...")
+                self.refresh_balance()
+            else:
+                # DRY RUN: Update simulated balances
+                self.balance_usd -= buy_amount
+                self.balance_btc += btc_amount
+            
+            # Update displays
+            self.test_balance_display_var.set(f"USD: ${self.balance_usd:.2f}  |  BTC: {self.balance_btc:.8f}")
+            self.balance_var.set(f"USD: ${self.balance_usd:.2f}\nBTC: {self.balance_btc:.8f}")
+            
+            # Show result
+            payment_info = "" if is_dry_run else "\n💳 Paid with Coinbase payment method"
+            result_text = (
+                f"✅ {mode_str} BUY EXECUTED{payment_info}\n"
+                f"Buy Price: ${buy_price:,.2f}\n"
+                f"USD Spent: ${buy_amount:.2f}\n"
+                f"Buy Fee (0.6%): ${buy_fee:.2f}\n"
+                f"BTC Received: {btc_amount:.8f} BTC\n"
+                f"Net Investment: ${net_investment:.2f}"
+            )
+            self.test_buy_result_var.set(result_text)
+            
+            print(f"\n{'='*60}")
+            print(f"✅ TEST BUY EXECUTED [{mode_str}]")
+            print(f"{'='*60}")
+            print(f"Buy Price: ${buy_price:,.2f}")
+            print(f"USD Spent: ${buy_amount:.2f}")
+            print(f"Buy Fee (0.6%): ${buy_fee:.2f}")
+            print(f"BTC Received: {btc_amount:.8f} BTC")
+            print(f"Net Investment: ${net_investment:.2f}")
+            print(f"{'='*60}")
+            
+        except ValueError as e:
+            self.test_buy_result_var.set(f"❌ Error: Invalid input - {e}")
+        except Exception as e:
+            self.test_buy_result_var.set(f"❌ Error: {str(e)}")
+            print(f"❌ Test buy error: {e}")
+    
+    def execute_test_sell(self):
+        """Execute a test sell order"""
+        try:
+            # Get parameters
+            sell_amount_btc = float(self.test_sell_amount_var.get())
+            sell_price_str = self.test_sell_price_var.get().replace(',', '').replace('$', '')
+            sell_price = float(sell_price_str) if sell_price_str and sell_price_str != '0' else self.current_price
+            is_dry_run = self.test_sell_mode_var.get()
+            
+            # Validate
+            if sell_amount_btc <= 0:
+                self.test_sell_result_var.set("❌ Error: Sell amount must be positive")
+                return
+            
+            if sell_price <= 0:
+                self.test_sell_result_var.set("❌ Error: Invalid price. Start monitoring to get market price.")
+                return
+            
+            # In DRY RUN mode: Skip BTC balance validation (use simulated balance)
+            # In LIVE mode: Validate BTC balance
+            if is_dry_run:
+                # DRY RUN: No balance check, simulate having BTC
+                print(f"\n💡 DRY RUN MODE: Using simulated BTC balance (no real BTC needed)")
+            else:
+                # LIVE mode: Must have actual BTC to sell
+                if sell_amount_btc > self.balance_btc:
+                    self.test_sell_result_var.set(f"❌ Error: Insufficient BTC. Need {sell_amount_btc:.8f}, have {self.balance_btc:.8f}")
+                    return
+            
+            # Calculate
+            gross_proceeds = sell_amount_btc * sell_price
+            sell_fee = gross_proceeds * self.sell_fee_rate
+            net_proceeds = gross_proceeds - sell_fee
+            
+            mode_str = "DRY RUN" if is_dry_run else "LIVE"
+            
+            # FASE 3: Validate price before LIVE execution
+            if not is_dry_run:
+                print(f"\n🔍 Validating price before test sell order...")
+                is_valid, validated_price, error_msg = self.validate_price_before_execution(sell_price, "TEST SELL")
+                
+                if not is_valid:
+                    self.test_sell_result_var.set(f"{error_msg}\n⚠️ Order cancelled")
+                    print(error_msg)
+                    print(f"⚠️ TEST SELL ORDER CANCELLED - Price validation failed")
+                    return
+                
+                # Use validated price
+                sell_price = validated_price
+                # Recalculate with validated price
+                gross_proceeds = sell_amount_btc * sell_price
+                sell_fee = gross_proceeds * self.sell_fee_rate
+                net_proceeds = gross_proceeds - sell_fee
+            
+            # Execute real order if LIVE mode
+            if not is_dry_run:
+                from trading_helpers import TradingHelpers
+                helpers = TradingHelpers()
+                
+                print(f"\n🔴 EXECUTING REAL TEST SELL ORDER...")
+                print(f"   Amount: {sell_amount_btc:.8f} BTC")
+                print(f"   Price: ${sell_price:,.2f}")
+                
+                result = helpers.sell_btc_market(btc_amount=sell_amount_btc)
+                
+                if not result.get('success'):
+                    error_msg = result.get('error', 'Unknown error')
+                    self.test_sell_result_var.set(f"❌ REAL SELL FAILED: {error_msg}")
+                    print(f"❌ REAL TEST SELL FAILED: {error_msg}")
+                    return
+                
+                print(f"✅ REAL TEST SELL EXECUTED: Order ID {result.get('order_id')}")
+                
+                # In LIVE mode, refresh balance from Coinbase after sale
+                print(f"🔄 Refreshing balance from Coinbase...")
+                self.refresh_balance()
+            else:
+                # DRY RUN: Update simulated balances
+                self.balance_btc -= sell_amount_btc
+                self.balance_usd += net_proceeds
+            
+            # Update displays
+            self.test_balance_display_var.set(f"USD: ${self.balance_usd:.2f}  |  BTC: {self.balance_btc:.8f}")
+            self.balance_var.set(f"USD: ${self.balance_usd:.2f}\nBTC: {self.balance_btc:.8f}")
+            
+            # Show result
+            result_text = (
+                f"✅ {mode_str} SELL EXECUTED\n"
+                f"Sell Price: ${sell_price:,.2f}\n"
+                f"BTC Sold: {sell_amount_btc:.8f} BTC\n"
+                f"Gross Proceeds: ${gross_proceeds:.2f}\n"
+                f"Sell Fee (0.6%): ${sell_fee:.2f}\n"
+                f"Net Proceeds: ${net_proceeds:.2f}"
+            )
+            self.test_sell_result_var.set(result_text)
+            
+            print(f"\n{'='*60}")
+            print(f"✅ TEST SELL EXECUTED [{mode_str}]")
+            print(f"{'='*60}")
+            print(f"Sell Price: ${sell_price:,.2f}")
+            print(f"BTC Sold: {sell_amount_btc:.8f} BTC")
+            print(f"Gross Proceeds: ${gross_proceeds:.2f}")
+            print(f"Sell Fee (0.6%): ${sell_fee:.2f}")
+            print(f"Net Proceeds: ${net_proceeds:.2f}")
+            print(f"{'='*60}")
+            
+        except ValueError as e:
+            self.test_sell_result_var.set(f"❌ Error: Invalid input - {e}")
+        except Exception as e:
+            self.test_sell_result_var.set(f"❌ Error: {str(e)}")
+            print(f"❌ Test sell error: {e}")
+    
     def create_configuration_tab(self):
         """Create the configuration interface"""
         # Store real API credentials
@@ -597,21 +1408,34 @@ class BTCTrader:
         buy_fee_frame = ttk.Frame(params_frame)
         buy_fee_frame.pack(fill=tk.X, pady=3)
         ttk.Label(buy_fee_frame, text="Buy Fee Rate (%):", width=20).pack(side=tk.LEFT)
-        self.config_buy_fee_var = tk.StringVar(value=str(self.buy_fee_rate * 100))
+        # Format fee with 1 decimal place (e.g., 0.6 instead of 0.6000...)
+        self.config_buy_fee_var = tk.StringVar(value=f"{self.buy_fee_rate * 100:.1f}")
         ttk.Entry(buy_fee_frame, textvariable=self.config_buy_fee_var, width=10).pack(side=tk.LEFT, padx=5)
         
         sell_fee_frame = ttk.Frame(params_frame)
         sell_fee_frame.pack(fill=tk.X, pady=3)
         ttk.Label(sell_fee_frame, text="Sell Fee Rate (%):", width=20).pack(side=tk.LEFT)
-        self.config_sell_fee_var = tk.StringVar(value=str(self.sell_fee_rate * 100))
+        # Format fee with 1 decimal place
+        self.config_sell_fee_var = tk.StringVar(value=f"{self.sell_fee_rate * 100:.1f}")
         ttk.Entry(sell_fee_frame, textvariable=self.config_sell_fee_var, width=10).pack(side=tk.LEFT, padx=5)
         
         # Position Size
         position_frame = ttk.Frame(params_frame)
         position_frame.pack(fill=tk.X, pady=3)
         ttk.Label(position_frame, text="Default Position Size ($):", width=20).pack(side=tk.LEFT)
-        self.config_position_var = tk.StringVar(value=str(self.position_size))
+        # Always show default value of 5.00 in config (not the adjusted value from real balance)
+        self.config_position_var = tk.StringVar(value="5.00")
         ttk.Entry(position_frame, textvariable=self.config_position_var, width=10).pack(side=tk.LEFT, padx=5)
+        ttk.Label(position_frame, text="(Min: $5.00)", foreground='gray').pack(side=tk.LEFT, padx=5)
+        
+        # Profit Rate
+        profit_frame = ttk.Frame(params_frame)
+        profit_frame.pack(fill=tk.X, pady=3)
+        ttk.Label(profit_frame, text="Profit Target (%):", width=20).pack(side=tk.LEFT)
+        # Format profit rate as percentage with 1 decimal place
+        self.config_profit_var = tk.StringVar(value=f"{self.profit_rate * 100:.1f}")
+        ttk.Entry(profit_frame, textvariable=self.config_profit_var, width=10).pack(side=tk.LEFT, padx=5)
+        ttk.Label(profit_frame, text="(Recommended: ≥2.5%)", foreground='gray').pack(side=tk.LEFT, padx=5)
         
         # Connection Status Section
         status_frame = ttk.LabelFrame(self.config_tab, text="📡 Connection Status", padding="15")
@@ -764,11 +1588,25 @@ class BTCTrader:
             try:
                 self.buy_fee_rate = float(self.config_buy_fee_var.get()) / 100
                 self.sell_fee_rate = float(self.config_sell_fee_var.get()) / 100
-                self.position_size = float(self.config_position_var.get())
-            except ValueError:
+                self.profit_rate = float(self.config_profit_var.get()) / 100
+                
+                # Validate position size (minimum $5)
+                new_position_size = float(self.config_position_var.get())
+                if new_position_size < self.min_position_size:
+                    print(f"\n⚠️ Position size too small! Minimum is ${self.min_position_size:.2f}")
+                    print(f"   Setting to minimum: ${self.min_position_size:.2f}")
+                    self.position_size = self.min_position_size
+                    self.config_position_var.set(str(self.min_position_size))
+                else:
+                    self.position_size = new_position_size
+                    
+            except ValueError as e:
+                print(f"\n⚠️ Invalid configuration value: {e}")
                 pass
             
             print("\n✅ Configuration saved to .env file")
+            print(f"   Profit Target: {self.profit_rate*100:.2f}%")
+            print(f"   Position Size: ${self.position_size:.2f}")
             print("⚠️ Restart the application to apply API changes")
             
         except Exception as e:
@@ -942,18 +1780,31 @@ class BTCTrader:
             return False
         
     def toggle_auto_buy(self):
-        """Enable/disable auto buy"""
+        """Enable/disable auto buy - AUTO-CALCULATES PRICE"""
         self.auto_buy_enabled = self.autobuy_enabled_var.get()
         
         if self.auto_buy_enabled:
             try:
-                self.auto_buy_price = float(self.autobuy_price_var.get())
-                if self.auto_buy_price <= 0:
-                    raise ValueError("Price must be positive")
+                # AUTO-CALCULATE: Set to current price - 1% (buy on dip)
+                if self.current_price > 0:
+                    # Strategy: Buy 1% below current price for safety
+                    auto_price = self.current_price * 0.99  # -1%
+                    self.autobuy_price_var.set(f"{auto_price:.2f}")
+                    self.auto_buy_price = auto_price
+                    
+                    print(f"\n🤖 Auto Buy ENABLED:")
+                    print(f"   Current Price: ${self.current_price:,.2f}")
+                    print(f"   Auto Buy Price: ${auto_price:,.2f} (-1% safety margin)")
+                    print(f"   💡 Strategy: Buy when price dips 1% below current")
+                else:
+                    # Fallback: use manual input
+                    self.auto_buy_price = float(self.autobuy_price_var.get())
+                    if self.auto_buy_price <= 0:
+                        raise ValueError("Price must be positive")
+                    print(f"\n🤖 Auto Buy ENABLED at ${self.auto_buy_price:,.2f} (manual price)")
                 
                 self.autobuy_status_var.set(f"🟢 Auto Buy: ACTIVE at ${self.auto_buy_price:,.2f}")
                 self.autobuy_price_entry.configure(state='disabled')
-                print(f"\n🤖 Auto Buy ENABLED: Will buy when price drops to ${self.auto_buy_price:,.2f}")
                 
             except ValueError as e:
                 self.autobuy_enabled_var.set(False)
@@ -976,19 +1827,78 @@ class BTCTrader:
             print("\n❌ Waiting for price data...")
     
     def toggle_auto_sell(self):
-        """Enable/disable auto sell"""
+        """Enable/disable auto sell - AUTO-CALCULATES TARGET PRICE WITH PERFECT HARMONY"""
         self.auto_sell_enabled = self.autosell_enabled_var.get()
         
         if self.auto_sell_enabled:
             try:
-                price_str = self.autosell_price_var.get().replace(',', '').replace('$', '')
-                self.auto_sell_price = float(price_str)
-                if self.auto_sell_price <= 0:
-                    raise ValueError("Price must be positive")
+                # PRIORITY 1: If we have an open position, use actual buy price
+                if self.last_buy_price > 0 and self.balance_btc > 0:
+                    # Strategy: Calculate price needed for 2.5% net profit after fees
+                    # Target formula: (Position × 1.025) / (1 - sell_fee) / btc_qty
+                    desired_net = self.position_size * (1 + self.profit_rate)
+                    required_gross = desired_net / (1 - self.sell_fee_rate)
+                    target_price = required_gross / self.balance_btc
+                    
+                    self.autosell_price_var.set(f"{target_price:.2f}")
+                    self.auto_sell_price = target_price
+                    
+                    # Calculate actual percentages
+                    price_increase_pct = ((target_price - self.last_buy_price) / self.last_buy_price) * 100
+                    
+                    print(f"\n🤖 Auto Sell ENABLED:")
+                    print(f"   Entry Price: ${self.last_buy_price:,.2f}")
+                    print(f"   Target Price: ${target_price:,.2f} (+{price_increase_pct:.2f}%)")
+                    print(f"   Expected Net Profit: ${self.position_size * self.profit_rate:.2f} ({self.profit_rate*100}%)")
+                    print(f"   💡 Strategy: Sell at calculated target for {self.profit_rate*100}% profit")
+                
+                # PRIORITY 2: If Auto Buy is active, calculate from Auto Buy price (HARMONY!)
+                elif self.auto_buy_enabled and self.auto_buy_price > 0:
+                    # Perfect harmony: Use Auto Buy price as entry for calculations
+                    entry_price = self.auto_buy_price
+                    
+                    # Calculate BTC that will be received at auto buy price
+                    net_investment = self.position_size * (1 - self.buy_fee_rate)
+                    btc_to_receive = net_investment / entry_price
+                    
+                    # Calculate target for 2.5% profit
+                    desired_net = self.position_size * (1 + self.profit_rate)
+                    required_gross = desired_net / (1 - self.sell_fee_rate)
+                    target_price = required_gross / btc_to_receive
+                    
+                    self.autosell_price_var.set(f"{target_price:.2f}")
+                    self.auto_sell_price = target_price
+                    
+                    # Calculate percentages
+                    price_increase_pct = ((target_price - entry_price) / entry_price) * 100
+                    
+                    print(f"\n🤖 Auto Sell ENABLED (HARMONIZED with Auto Buy):")
+                    print(f"   Auto Buy Price: ${entry_price:,.2f}")
+                    print(f"   Auto Sell Target: ${target_price:,.2f} (+{price_increase_pct:.2f}%)")
+                    print(f"   Expected Net Profit: ${self.position_size * self.profit_rate:.2f} ({self.profit_rate*100}%)")
+                    print(f"   ✅ PERFECT HARMONY: Buy @ ${entry_price:,.2f} → Sell @ ${target_price:,.2f}")
+                    print(f"   💡 Guaranteed {self.profit_rate*100}% profit when both execute")
+                
+                # PRIORITY 3: No position, no auto buy, use current price as reference
+                elif self.current_price > 0:
+                    estimated_target = self.current_price * (1 + self.profit_rate + self.buy_fee_rate + self.sell_fee_rate)
+                    self.autosell_price_var.set(f"{estimated_target:.2f}")
+                    self.auto_sell_price = estimated_target
+                    
+                    print(f"\n🤖 Auto Sell ENABLED:")
+                    print(f"   Current Price: ${self.current_price:,.2f}")
+                    print(f"   Estimated Target: ${estimated_target:,.2f}")
+                    print(f"   ⚠️ Will recalculate exact target after buy")
+                else:
+                    # Fallback: use manual input
+                    price_str = self.autosell_price_var.get().replace(',', '').replace('$', '')
+                    self.auto_sell_price = float(price_str)
+                    if self.auto_sell_price <= 0:
+                        raise ValueError("Price must be positive")
+                    print(f"\n🤖 Auto Sell ENABLED at ${self.auto_sell_price:,.2f} (manual price)")
                 
                 self.autosell_status_var.set(f"🟢 Auto Sell: ACTIVE at ${self.auto_sell_price:,.2f}")
                 self.autosell_price_entry.configure(state='disabled')
-                print(f"\n🤖 Auto Sell ENABLED: Will sell when price reaches ${self.auto_sell_price:,.2f}")
                 
             except ValueError as e:
                 self.autosell_enabled_var.set(False)
@@ -1080,30 +1990,55 @@ class BTCTrader:
             print(f"\n❌ Error: {str(e)}")
             
     def update_price(self):
-        """Update BTC price and check trading conditions"""
+        """Update BTC price and check trading conditions (REST API fallback)"""
         last_error_time = 0
         error_count = 0
         consecutive_errors = 0
         
         while self.is_running:
             try:
+                # If WebSocket is active and working, reduce REST frequency
+                if self.websocket_feed and self.websocket_feed.is_connected:
+                    time.sleep(5)  # Only check every 5 seconds as fallback
+                    continue
+                
+                # Measure REST API latency
+                start_time = time.time()
+                
                 # Get price from Coinbase API
                 response = requests.get(
                     'https://api.coinbase.com/v2/prices/BTC-USD/spot',
                     timeout=10
                 )
                 
+                latency_ms = int((time.time() - start_time) * 1000)
+                
                 if response.status_code == 200:
                     data = response.json()
                     if 'data' in data and 'amount' in data['data']:
                         self.current_price = float(data['data']['amount'])
-                        self.price_var.set(f"${self.current_price:,.2f}")
+                        self.rest_latency_ms = latency_ms
                         
-                        # Update timestamp
-                        current_time = datetime.now()
-                        self.last_update_var.set(
-                            f"Updated: {current_time.strftime('%H:%M:%S.%f')[:-3]}"
-                        )
+                        # Only update UI if WebSocket is not active
+                        if not (self.websocket_feed and self.websocket_feed.is_connected):
+                            self.price_var.set(f"${self.current_price:,.2f}")
+                            
+                            # Update test tab price display
+                            if hasattr(self, 'test_price_var'):
+                                self.test_price_var.set(f"${self.current_price:,.2f}")
+                            
+                            # Update timestamp
+                            current_time = datetime.now()
+                            self.last_update_var.set(
+                                f"Updated: {current_time.strftime('%H:%M:%S.%f')[:-3]}"
+                            )
+                            
+                            # Update latency display
+                            self.latency_var.set(f"📱 Latency: {latency_ms}ms | Source: REST API")
+                            
+                            # Update connection status indicator
+                            if hasattr(self, 'price_status_var'):
+                                self.price_status_var.set("✅ REST API Conectado")
                         
                         # Connection successful
                         error_count = 0
@@ -1111,50 +2046,9 @@ class BTCTrader:
                         self.price_connection_ok = True
                         self.last_price_error = None
                         
-                        # Update connection status indicator
-                        if hasattr(self, 'price_status_var'):
-                            self.price_status_var.set("✅ Conectado a Coinbase")
-                        
-                        # Check auto buy trigger
-                        if (self.auto_buy_enabled and 
-                            not self.auto_buy_executed and 
-                            self.balance_btc == 0 and
-                            self.current_price <= self.auto_buy_price):
-                            
-                            print(f"\n🤖 AUTO BUY TRIGGERED!")
-                            print(f"   Current Price: ${self.current_price:,.2f}")
-                            print(f"   Trigger Price: ${self.auto_buy_price:,.2f}")
-                            
-                            # Execute auto buy (uses current price automatically)
-                            self.auto_buy_executed = True
-                            self.execute_buy()
-                            
-                            # Disable auto buy after execution
-                            self.autobuy_enabled_var.set(False)
-                            self.auto_buy_enabled = False
-                            self.autobuy_status_var.set("⚪ Auto Buy: Disabled (Executed)")
-                            self.autobuy_price_entry.configure(state='normal')
-                        
-                        # Check auto sell trigger
-                        if (self.auto_sell_enabled and 
-                            self.balance_btc > 0 and
-                            self.current_price >= self.auto_sell_price):
-                            
-                            print(f"\n🤖 AUTO SELL TRIGGERED!")
-                            print(f"   Current Price: ${self.current_price:,.2f}")
-                            print(f"   Trigger Price: ${self.auto_sell_price:,.2f}")
-                            
-                            # Execute auto sell
-                            self.execute_sell("Auto Sell")
-                            
-                            # Disable auto sell after execution
-                            self.autosell_enabled_var.set(False)
-                            self.auto_sell_enabled = False
-                            self.autosell_status_var.set("⚪ Auto Sell: Disabled (Executed)")
-                            self.autosell_price_entry.configure(state='normal')
-                        
-                        # Update display
-                        self.check_position()
+                        # Check triggers only if WebSocket is not handling it
+                        if not (self.websocket_feed and self.websocket_feed.is_connected):
+                            self.check_auto_triggers()
                     else:
                         raise ValueError("Invalid response format")
                 else:
@@ -1431,6 +2325,13 @@ class BTCTrader:
                 print("\n❌ Invalid entry price - no price data available")
                 return
             
+            # Validate minimum position size
+            if self.position_size < self.min_position_size:
+                print(f"\n❌ Position size too small! Minimum is ${self.min_position_size:.2f}")
+                print(f"   Current: ${self.position_size:.2f}")
+                print(f"   Please adjust in Configuration tab")
+                return
+            
             # Calculate buy using CORRECT formula
             buy_fee = self.position_size * self.buy_fee_rate
             net_investment = self.position_size - buy_fee
@@ -1440,6 +2341,20 @@ class BTCTrader:
             if self.position_size > self.balance_usd:
                 print(f"\n❌ Insufficient funds! Need ${self.position_size:.2f}, have ${self.balance_usd:.2f}")
                 return
+            
+            # FASE 3: Validate price before execution
+            print(f"\n🔍 Validating price before buy order...")
+            is_valid, validated_price, error_msg = self.validate_price_before_execution(entry_price, "BUY")
+            
+            if not is_valid:
+                print(error_msg)
+                print(f"⚠️ BUY ORDER CANCELLED - Price validation failed")
+                return
+            
+            # Use validated price for execution
+            entry_price = validated_price
+            # Recalculate with validated price
+            btc_amount = net_investment / entry_price
             
             # Execute REAL buy order if in LIVE mode
             if not self.dry_run:
@@ -1469,6 +2384,28 @@ class BTCTrader:
             # Verification
             expected_net_profit = self.position_size * self.profit_rate
             
+            # Save to database
+            mode_str = "DRY RUN" if self.dry_run else "LIVE"
+            self.db.save_trade(
+                trade_type="BUY",
+                price=entry_price,
+                amount_usd=self.position_size,
+                amount_btc=btc_amount,
+                fee=buy_fee,
+                profit=0,
+                mode=mode_str,
+                notes=f"Auto buy" if self.auto_buy_enabled else "Manual buy"
+            )
+            
+            # Save session (open position)
+            self.db.save_session(
+                last_buy_price=entry_price,
+                position_size=self.position_size,
+                btc_amount=btc_amount,
+                target_price=target_price,
+                stop_loss=stop_price
+            )
+            
             mode_indicator = " [DRY RUN]" if self.dry_run else " [LIVE]"
             print(f"\n✓ BUY EXECUTED{mode_indicator}:")
             print(f"   Entry Price: ${entry_price:,.2f}")
@@ -1486,7 +2423,8 @@ class BTCTrader:
             
             # Disable buy button and entry price field during active position
             self.buy_button.configure(state='disabled')
-            self.entry_price_entry.configure(state='disabled')
+            if hasattr(self, 'entry_price_entry'):
+                self.entry_price_entry.configure(state='disabled')
             
             # AUTO-LOOP: Calculate sell target and activate Auto Sell
             if self.auto_mode or self.auto_sell_enabled:
@@ -1517,9 +2455,21 @@ class BTCTrader:
     def execute_sell(self, reason: str):
         """Execute sell order"""
         try:
+            # FASE 3: Validate price before execution
+            print(f"\n🔍 Validating price before sell order...")
+            is_valid, validated_price, error_msg = self.validate_price_before_execution(self.current_price, "SELL")
+            
+            if not is_valid:
+                print(error_msg)
+                print(f"⚠️ SELL ORDER CANCELLED - Price validation failed")
+                return
+            
+            # Use validated price
+            sell_price = validated_price
+            
             # Calculate sell
             btc_qty = self.balance_btc  # Store before clearing
-            gross_proceeds = btc_qty * self.current_price
+            gross_proceeds = btc_qty * sell_price
             sell_fee = gross_proceeds * self.sell_fee_rate
             net_proceeds = gross_proceeds - sell_fee
             
@@ -1551,9 +2501,25 @@ class BTCTrader:
             self.balance_btc = 0
             self.last_buy_price = 0
             
+            # Save to database
+            mode_str = "DRY RUN" if self.dry_run else "LIVE"
+            self.db.save_trade(
+                trade_type="SELL",
+                price=sell_price,
+                amount_usd=net_proceeds,
+                amount_btc=btc_qty,
+                fee=sell_fee,
+                profit=net_profit,
+                mode=mode_str,
+                notes=f"{reason}"
+            )
+            
+            # Close session (position closed)
+            self.db.close_session()
+            
             mode_indicator = " [DRY RUN]" if self.dry_run else " [LIVE]"
             print(f"\n✓ SELL EXECUTED ({reason}){mode_indicator}:")
-            print(f"   Sale Price: ${self.current_price:,.2f}")
+            print(f"   Sale Price: ${sell_price:,.2f}")
             print(f"   BTC Qty: {btc_qty:.8f}")
             print(f"   Gross Value: ${gross_proceeds:.2f}")
             print(f"   Sell Fee ({self.sell_fee_rate*100}%): ${sell_fee:.2f}")
@@ -1568,7 +2534,8 @@ class BTCTrader:
             # Re-enable buy button and entry price field after selling
             if self.is_running:
                 self.buy_button.configure(state='normal')
-            self.entry_price_entry.configure(state='normal')
+            if hasattr(self, 'entry_price_entry'):
+                self.entry_price_entry.configure(state='normal')
             
             # Reset auto buy flag so it can trigger again
             self.auto_buy_executed = False
@@ -1578,7 +2545,7 @@ class BTCTrader:
                 # Calculate rebuy price: Sell price - X% (to profit on the cycle)
                 # Use configurable rebuy drop %
                 rebuy_drop_pct = self.rebuy_drop
-                rebuy_price = self.current_price * (1 - rebuy_drop_pct / 100)
+                rebuy_price = sell_price * (1 - rebuy_drop_pct / 100)
                 
                 # Activate Auto Buy at the rebuy price
                 self.auto_buy_price = rebuy_price
@@ -1608,12 +2575,180 @@ class BTCTrader:
             f"Profit: ${self.total_profit:.2f} | ROI: {roi:+.2f}%"
         )
         
+        # Save to database
+        self.db.save_statistics(
+            total_trades=self.trades_count,
+            winning_trades=self.winning_trades,
+            total_profit=self.total_profit,
+            win_rate=win_rate,
+            roi=roi
+        )
+        
+    def on_websocket_price(self, price, latency_ms):
+        """Callback for WebSocket price updates"""
+        try:
+            self.current_price = price
+            self.websocket_latency_ms = latency_ms
+            self.last_price_update_time = time.time()  # Track price freshness
+            self.price_var.set(f"${self.current_price:,.2f}")
+            
+            # Update test tab price display
+            if hasattr(self, 'test_price_var'):
+                self.test_price_var.set(f"${self.current_price:,.2f}")
+            
+            # Update timestamp
+            current_time = datetime.now()
+            self.last_update_var.set(
+                f"Updated: {current_time.strftime('%H:%M:%S.%f')[:-3]}"
+            )
+            
+            # Update latency display
+            self.latency_var.set(f"📡 Latency: {latency_ms}ms | Source: WebSocket ⚡")
+            
+            # Update connection status
+            self.price_connection_ok = True
+            self.price_status_var.set("✅ WebSocket Conectado")
+            
+            # Check auto buy/sell triggers
+            self.check_auto_triggers()
+            
+        except Exception as e:
+            print(f"❌ Error processing WebSocket price: {e}")
+    
+    def on_websocket_error(self, error):
+        """Callback for WebSocket errors"""
+        print(f"⚠️ WebSocket error: {error}")
+        # Will fallback to REST automatically
+    
+    def is_price_stale(self):
+        """Check if current price data is too old"""
+        if self.last_price_update_time == 0:
+            return True
+        age = time.time() - self.last_price_update_time
+        return age > self.max_price_age_seconds
+    
+    def get_fresh_price(self):
+        """Get a fresh price reading, return (price, success, error_message)"""
+        try:
+            # Check if WebSocket price is fresh
+            if self.websocket_feed and self.websocket_feed.is_connected:
+                if not self.websocket_feed.is_price_stale(max_age_seconds=self.max_price_age_seconds):
+                    price = self.websocket_feed.get_price()
+                    if price > 0:
+                        self.last_price_update_time = time.time()
+                        return (price, True, None)
+            
+            # Fallback to REST API
+            print("   📱 Getting fresh price from REST API...")
+            start_time = time.time()
+            response = requests.get(
+                'https://api.coinbase.com/v2/prices/BTC-USD/spot',
+                timeout=5
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                if 'data' in data and 'amount' in data['data']:
+                    price = float(data['data']['amount'])
+                    latency_ms = int((time.time() - start_time) * 1000)
+                    self.last_price_update_time = time.time()
+                    print(f"   ✅ Fresh price: ${price:,.2f} (latency: {latency_ms}ms)")
+                    return (price, True, None)
+            
+            return (0, False, "Failed to get price from API")
+            
+        except Exception as e:
+            return (0, False, f"Error getting fresh price: {str(e)}")
+    
+    def validate_price_before_execution(self, expected_price, operation_name="order"):
+        """
+        Validate price before executing an order
+        Returns: (is_valid, actual_price, error_message)
+        """
+        # Get fresh price
+        fresh_price, success, error = self.get_fresh_price()
+        
+        if not success:
+            return (False, 0, f"❌ Cannot get fresh price: {error}")
+        
+        # Calculate price deviation
+        price_diff = abs(fresh_price - expected_price)
+        price_deviation_pct = (price_diff / expected_price) * 100
+        
+        # Check if deviation is acceptable
+        if price_deviation_pct > self.max_price_deviation_pct:
+            return (
+                False,
+                fresh_price,
+                f"❌ Price moved too much! Expected: ${expected_price:,.2f}, "
+                f"Actual: ${fresh_price:,.2f} (Δ{price_deviation_pct:+.2f}%)"
+            )
+        
+        # Price is valid
+        print(f"   ✅ Price validation passed: ${fresh_price:,.2f} "
+              f"(deviation: {price_deviation_pct:.3f}%)")
+        return (True, fresh_price, None)
+    
+    def check_auto_triggers(self):
+        """Check auto buy and auto sell triggers"""
+        # Check auto buy trigger
+        if (self.auto_buy_enabled and 
+            not self.auto_buy_executed and 
+            self.balance_btc == 0 and
+            self.current_price <= self.auto_buy_price):
+            
+            print(f"\n🤖 AUTO BUY TRIGGERED!")
+            print(f"   Current Price: ${self.current_price:,.2f}")
+            print(f"   Trigger Price: ${self.auto_buy_price:,.2f}")
+            
+            # Execute auto buy
+            self.auto_buy_executed = True
+            self.execute_buy()
+            
+            # Disable auto buy after execution
+            self.autobuy_enabled_var.set(False)
+            self.auto_buy_enabled = False
+            self.autobuy_status_var.set("⚪ Auto Buy: Disabled (Executed)")
+            self.autobuy_price_entry.configure(state='normal')
+        
+        # Check auto sell trigger
+        if (self.auto_sell_enabled and 
+            self.balance_btc > 0 and
+            self.current_price >= self.auto_sell_price):
+            
+            print(f"\n🤖 AUTO SELL TRIGGERED!")
+            print(f"   Current Price: ${self.current_price:,.2f}")
+            print(f"   Trigger Price: ${self.auto_sell_price:,.2f}")
+            
+            # Execute auto sell
+            self.execute_sell("Auto Sell")
+            
+            # Disable auto sell after execution
+            self.autosell_enabled_var.set(False)
+            self.auto_sell_enabled = False
+            self.autosell_status_var.set("⚪ Auto Sell: Disabled (Executed)")
+            self.autosell_price_entry.configure(state='normal')
+        
+        # Update display
+        self.check_position()
+    
     def toggle_trading(self):
         """Toggle monitoring on/off"""
         self.is_running = not self.is_running
         
         if self.is_running:
             self.start_button.configure(text="Stop Monitoring")
+            
+            # Start WebSocket for real-time prices
+            if self.use_websocket:
+                print("\n🚀 Starting WebSocket connection...")
+                self.websocket_feed = CoinbaseWebSocketFeed("BTC-USD")
+                self.websocket_feed.connect(
+                    price_callback=self.on_websocket_price,
+                    error_callback=self.on_websocket_error
+                )
+            
+            # Start REST API fallback thread
             self.update_thread = threading.Thread(target=self.update_price)
             self.update_thread.daemon = True
             self.update_thread.start()
@@ -1623,11 +2758,18 @@ class BTCTrader:
                 self.buy_button.configure(state='normal')
             
             print("\n📊 Live Monitoring Started")
-            print("   🔄 Price updates: 10 times per second (100ms intervals)")
+            print("   🚀 WebSocket: Real-time price updates (<50ms latency)")
+            print("   🔄 REST API: Fallback if WebSocket fails")
             print("   💰 Click 'Execute Buy' when ready to open a position")
         else:
             self.start_button.configure(text="Start Monitoring")
             self.buy_button.configure(state='disabled')
+            
+            # Stop WebSocket
+            if self.websocket_feed:
+                self.websocket_feed.disconnect()
+                self.websocket_feed = None
+            
             print("\n⏸️  Monitoring stopped")
             
     def run(self):
