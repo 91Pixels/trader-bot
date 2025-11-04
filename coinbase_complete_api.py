@@ -27,44 +27,62 @@ class CoinbaseCompleteAPI:
     
     def _make_request(self, method, endpoint, data=None, params=None):
         """Make authenticated API request using JWT"""
-        if not self.is_live:
-            raise Exception("Cannot make API requests in SIMULATION mode")
-        
-        if not self.is_jwt_format:
-            raise Exception("API credentials must be in ECDSA format with PEM private key")
-        
-        # Build request path
-        request_path = f"/api/v3/brokerage{endpoint}"
-        
-        # Generate JWT token for this specific request
-        jwt_uri = jwt_generator.format_jwt_uri(method, request_path)
-        jwt_token = jwt_generator.build_rest_jwt(jwt_uri, self.api_key, self.api_secret)
-        
-        # Build headers with JWT
-        headers = {
-            'Authorization': f'Bearer {jwt_token}',
-            'Content-Type': 'application/json'
-        }
-        
-        url = f"{self.BASE_URL}{request_path}"
-        
-        if method == 'GET':
-            response = requests.get(url, headers=headers, params=params, timeout=10)
-        elif method == 'POST':
-            import json
-            body = json.dumps(data) if data else ''
-            response = requests.post(url, headers=headers, data=body, timeout=10)
-        elif method == 'PUT':
-            import json
-            body = json.dumps(data) if data else ''
-            response = requests.put(url, headers=headers, data=body, timeout=10)
-        elif method == 'DELETE':
-            response = requests.delete(url, headers=headers, timeout=10)
-        else:
-            raise ValueError(f"Unsupported method: {method}")
-        
-        response.raise_for_status()
-        return response.json()
+        try:
+            if not self.is_live:
+                raise Exception("Cannot make API requests in SIMULATION mode")
+            
+            if not self.is_jwt_format:
+                raise Exception("API credentials must be in ECDSA format with PEM private key")
+            
+            # Build request path
+            request_path = f"/api/v3/brokerage{endpoint}"
+            
+            # Generate JWT token for this specific request
+            try:
+                jwt_uri = jwt_generator.format_jwt_uri(method, request_path)
+                jwt_token = jwt_generator.build_rest_jwt(jwt_uri, self.api_key, self.api_secret)
+                print(f"✅ JWT token generated for {method} {endpoint}")
+            except Exception as e:
+                print(f"❌ Error generating JWT token: {e}")
+                print(f"   API Key: {self.api_key[:30] if self.api_key else 'None'}...")
+                print(f"   API Secret starts: {self.api_secret[:30] if self.api_secret else 'None'}...")
+                raise
+            
+            # Build headers with JWT
+            headers = {
+                'Authorization': f'Bearer {jwt_token}',
+                'Content-Type': 'application/json'
+            }
+            
+            url = f"{self.BASE_URL}{request_path}"
+            
+            if method == 'GET':
+                response = requests.get(url, headers=headers, params=params, timeout=10)
+            elif method == 'POST':
+                import json
+                body = json.dumps(data) if data else ''
+                response = requests.post(url, headers=headers, data=body, timeout=10)
+            elif method == 'PUT':
+                import json
+                body = json.dumps(data) if data else ''
+                response = requests.put(url, headers=headers, data=body, timeout=10)
+            elif method == 'DELETE':
+                response = requests.delete(url, headers=headers, timeout=10)
+            else:
+                raise ValueError(f"Unsupported method: {method}")
+            
+            response.raise_for_status()
+            return response.json()
+            
+        except requests.exceptions.HTTPError as e:
+            print(f"❌ HTTP Error {method} {endpoint}: {e}")
+            print(f"   Response: {e.response.text if hasattr(e.response, 'text') else 'No response text'}")
+            raise
+        except Exception as e:
+            print(f"❌ Error in _make_request {method} {endpoint}: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
     
     def _make_public_request(self, method, endpoint, params=None):
         """Make public API request (no authentication)"""

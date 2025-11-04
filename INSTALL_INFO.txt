@@ -1,0 +1,86 @@
+================================================================================
+                    CRIPTO-BOT INSTALLATION INFORMATION
+                            Version 1.0 Beta
+================================================================================
+
+Welcome to Cripto-Bot Setup!
+
+This wizard will guide you through the installation of Cripto-Bot, a 
+professional Bitcoin trading bot for Coinbase.
+
+BEFORE YOU BEGIN:
+================================================================================
+
+1. COINBASE API KEYS REQUIRED
+   - You must have a Coinbase account with API access
+   - You will need your API Key and API Secret
+   - The bot supports both JWT and ECDSA key formats
+
+2. SYSTEM REQUIREMENTS
+   - Windows 10 or 11 (64-bit)
+   - 4GB RAM minimum
+   - 100MB free disk space
+   - Active internet connection
+
+3. IMPORTANT SECURITY NOTES
+   - Your API keys will be stored locally in a .env file
+   - NEVER share your .env file with anyone
+   - Keep your API keys secure
+   - Start with SIMULATION mode to test safely
+
+AFTER INSTALLATION:
+================================================================================
+
+1. CONFIGURE API KEYS
+   The installer will open .env.example for you to edit.
+   
+   Steps:
+   a) Open the .env.example file in the installation folder
+   b) Add your Coinbase API credentials
+   c) Save the file as ".env" (remove .example extension)
+
+2. FILE LOCATIONS
+   Program Files: C:\Program Files\Cripto-Bot\
+   - Cripto-Bot.exe (main application)
+   - assets\ (logo and images)
+   - .env (your API keys - YOU CREATE THIS)
+   - trading_bot.db (created automatically)
+   - docs\ (documentation)
+
+3. FIRST RUN
+   - Double-click Cripto-Bot icon on Desktop or Start Menu
+   - The bot will connect to Coinbase using your .env credentials
+   - Start in SIMULATION mode to test without real trades
+   - Switch to LIVE mode when ready
+
+FEATURES:
+================================================================================
+
+✓ Real-time Bitcoin price monitoring via WebSocket
+✓ Automated buy/sell strategies with customizable parameters
+✓ 2.5% profit target after fees (configurable)
+✓ Stop-loss protection
+✓ Position tracking and profit calculator
+✓ Database persistence for all trades and sessions
+✓ Modern dark theme UI with professional design
+✓ Manual and automatic trading modes
+✓ Real-time balance synchronization with Coinbase
+
+SUPPORT:
+================================================================================
+
+For questions or support:
+Email: 91pixelsusa@gmail.com
+
+Creator: Michael Camacho
+Version: 1.0 Beta
+Release Date: November 2025
+
+================================================================================
+
+Ready to install? Click Next to continue...
+
+WARNING: Trading cryptocurrencies involves substantial risk of loss.
+         Use this software at your own risk.
+
+================================================================================

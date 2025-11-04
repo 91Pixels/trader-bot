@@ -3,11 +3,38 @@ Configuration management for BTC Trading Bot
 Loads settings from .env file and validates them
 """
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
+# Determine the base directory for finding .env
+# When running as PyInstaller executable, save in AppData
+if getattr(sys, 'frozen', False):
+    # Running as executable
+    app_data = os.path.join(os.getenv('APPDATA'), 'Cripto-Bot')
+    # Try multiple locations for .env
+    env_locations = [
+        os.path.join(app_data, '.env'),  # AppData (preferred)
+        os.path.join(os.path.expanduser('~'), 'Desktop', '.env'),  # Desktop
+        os.path.join(os.path.dirname(sys.executable), '.env'),  # Program Files
+        os.path.join(sys._MEIPASS, '.env'),  # Temp folder (if bundled)
+    ]
+    
+    env_loaded = False
+    for env_path in env_locations:
+        if os.path.exists(env_path):
+            print(f"✅ Found .env at: {env_path}")
+            load_dotenv(env_path)
+            env_loaded = True
+            break
+    
+    if not env_loaded:
+        print(f"⚠️ Warning: .env not found. Searched in:")
+        for loc in env_locations:
+            print(f"   - {loc}")
+else:
+    # Running as script
+    load_dotenv()
 
 
 class Config:

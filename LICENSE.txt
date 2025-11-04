@@ -1,0 +1,41 @@
+CRIPTO-BOT LICENSE AGREEMENT
+Version 1.0 Beta
+
+Copyright (c) 2025 Michael Camacho
+License: 91pixelsusa@gmail.com
+
+TERMS AND CONDITIONS
+
+1. LICENSE GRANT
+   This software is provided under a proprietary license.
+
+2. PERMITTED USE
+   - Personal trading use
+   - Educational purposes
+   - Single user installation
+
+3. RESTRICTIONS
+   - No redistribution without permission
+   - No commercial resale
+   - No reverse engineering
+
+4. DISCLAIMER
+   THIS SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+   OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+   NONINFRINGEMENT.
+
+5. LIMITATION OF LIABILITY
+   IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
+   FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY ARISING FROM THE USE
+   OF THIS SOFTWARE.
+
+6. TRADING DISCLAIMER
+   TRADING CRYPTOCURRENCIES INVOLVES SUBSTANTIAL RISK OF LOSS.
+   USE THIS SOFTWARE AT YOUR OWN RISK.
+   PAST PERFORMANCE IS NOT INDICATIVE OF FUTURE RESULTS.
+
+7. CONTACT
+   For licensing inquiries: 91pixelsusa@gmail.com
+
+By installing this software, you agree to these terms.

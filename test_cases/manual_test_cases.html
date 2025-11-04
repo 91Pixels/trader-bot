@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Cripto-Bot - Manual Test Cases</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            line-height: 1.6;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            padding: 20px;
+            background: #fff;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .test-case {
+            background: #fff;
+            margin: 20px 0;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .test-id {
+            font-weight: bold;
+            color: #2980b9;
+        }
+        .category {
+            background: #3498db;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 3px;
+            display: inline-block;
+            margin: 5px 0;
+        }
+        .precondition {
+            background: #f1c40f;
+            padding: 10px;
+            border-radius: 3px;
+            margin: 10px 0;
+        }
+        .steps {
+            list-style-type: decimal;
+            padding-left: 20px;
+        }
+        .expected {
+            background: #2ecc71;
+            color: white;
+            padding: 10px;
+            border-radius: 3px;
+            margin: 10px 0;
+        }
+        .critical {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        .calculator-example {
+            background: #34495e;
+            color: white;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+            font-family: monospace;
+        }
+        .formula {
+            background: #2c3e50;
+            padding: 10px;
+            border-radius: 3px;
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🤖 Cripto-Bot - Manual Test Cases</h1>
+
+    <div class="test-case">
+        <span class="test-id">TC-000: Validación de Cálculos</span>
+        <div class="category">Cálculos Críticos</div>
+        <div class="precondition">
+            <strong>Precondiciones:</strong>
+            <ul>
+                <li>Calculadora con 8 decimales</li>
+                <li>Papel para notas</li>
+                <li>Acceso a las operaciones del bot</li>
+            </ul>
+        </div>
+
+        <h3>1. Cálculo de Profit Target 📈</h3>
+        <div class="calculator-example">
+            <div class="formula">Target Price = Entry Price × (1 + Target%)</div>
+            Ejemplo:
+            <ul>
+                <li>Entry Price: $40,000</li>
+                <li>Target: 1.5%</li>
+                <li>Cálculo: $40,000 × (1 + 0.015)</li>
+                <li>Target Price = $40,600</li>
+            </ul>
+        </div>
+
+        <h3>2. Cálculo de Stop Loss 📉</h3>
+        <div class="calculator-example">
+            <div class="formula">Stop Price = Entry Price × (1 - Stop%)</div>
+            Ejemplo:
+            <ul>
+                <li>Entry Price: $40,000</li>
+                <li>Stop: 1%</li>
+                <li>Cálculo: $40,000 × (1 - 0.01)</li>
+                <li>Stop Price = $39,600</li>
+            </ul>
+        </div>
+
+        <h3>3. Cálculo de Profit Real 💰</h3>
+        <div class="calculator-example">
+            <div class="formula">Profit = (Exit Price - Entry Price) × Size - Fees</div>
+            Ejemplo:
+            <ul>
+                <li>Entry Price: $40,000</li>
+                <li>Exit Price: $40,600</li>
+                <li>Position Size: 0.1 BTC</li>
+                <li>Fees: 0.6% × 2 (entrada y salida)</li>
+                <li>Cálculo:</li>
+                <li>1. Profit Bruto = ($40,600 - $40,000) × 0.1 = $60</li>
+                <li>2. Fees = ($40,000 × 0.1 × 0.006) + ($40,600 × 0.1 × 0.006) = $24 + $24.36 = $48.36</li>
+                <li>3. Profit Neto = $60 - $48.36 = $11.64</li>
+            </ul>
+        </div>
+
+        <h3>4. Validación de Trailing Stop 🔄</h3>
+        <div class="calculator-example">
+            <div class="formula">New Stop = Current Price × (1 - Trail%)</div>
+            Ejemplo:
+            <ul>
+                <li>Entry: $40,000</li>
+                <li>Trail: 1%</li>
+                <li>Precio sube a $41,000:</li>
+                <li>Nuevo Stop = $41,000 × 0.99 = $40,590</li>
+                <li>Precio sube a $41,500:</li>
+                <li>Nuevo Stop = $41,500 × 0.99 = $41,085</li>
+            </ul>
+        </div>
+
+        <h3>5. Validación de Position Size 📊</h3>
+        <div class="calculator-example">
+            <div class="formula">BTC Amount = USD Amount ÷ Current Price</div>
+            Ejemplo 1 (Compra Simple):
+            <ul>
+                <li>Inversión: $1,000</li>
+                <li>BTC Price: $40,000</li>
+                <li>Cálculo: $1,000 ÷ $40,000 = 0.025 BTC</li>
+                <li>Fee Check: 0.025 × $40,000 × 0.006 = $6 (entrada)</li>
+                <li>Cantidad Real: $1,000 - $6 = $994 disponibles</li>
+                <li>BTC Final: $994 ÷ $40,000 = 0.02485 BTC</li>
+            </ul>
+            
+            Ejemplo 2 (Compra con Límites):
+            <ul>
+                <li>Balance: $5,000</li>
+                <li>MAX_POSITION_SIZE: $1,000</li>
+                <li>BTC Price: $40,000</li>
+                <li>Fees: 0.6%</li>
+                <li>Cálculo Máximo Real:</li>
+                <li>1. Fee Reserva = $1,000 × 0.006 = $6</li>
+                <li>2. Cantidad Ajustada = $1,000 - $6 = $994</li>
+                <li>3. BTC Máximo = $994 ÷ $40,000 = 0.02485 BTC</li>
+            </ul>
+        </div>
+
+        <h3>6. Validación de Profit Porcentual 📊</h3>
+        <div class="calculator-example">
+            <div class="formula">Profit% = ((Current Price - Entry Price) ÷ Entry Price) × 100</div>
+            Ejemplo 1 (Profit):
+            <ul>
+                <li>Entry Price: $40,000</li>
+                <li>Current Price: $41,200</li>
+                <li>Cálculo: (($41,200 - $40,000) ÷ $40,000) × 100</li>
+                <li>         = ($1,200 ÷ $40,000) × 100</li>
+                <li>         = 0.03 × 100</li>
+                <li>Profit = 3%</li>
+            </ul>
+            
+            Ejemplo 2 (Loss):
+            <ul>
+                <li>Entry Price: $40,000</li>
+                <li>Current Price: $39,200</li>
+                <li>Cálculo: (($39,200 - $40,000) ÷ $40,000) × 100</li>
+                <li>         = (-$800 ÷ $40,000) × 100</li>
+                <li>         = -0.02 × 100</li>
+                <li>Loss = -2%</li>
+            </ul>
+        </div>
+
+        <h3>7. Validación de Break-Even con Fees 💹</h3>
+        <div class="calculator-example">
+            <div class="formula">Break-Even = Entry Price × (1 + (Fee% × 2))</div>
+            Ejemplo Detallado:
+            <ul>
+                <li>Entry Price: $40,000</li>
+                <li>Position Size: 0.1 BTC</li>
+                <li>Fee Rate: 0.6%</li>
+                <li>Cálculos:</li>
+                <li>1. Entry Fee = $40,000 × 0.1 × 0.006 = $24</li>
+                <li>2. Future Exit Fee (at break-even) = $40,000 × 0.1 × 0.006 = $24</li>
+                <li>3. Total Fees = $48</li>
+                <li>4. Break-Even Price = $40,000 × (1 + (0.006 × 2))</li>
+                <li>5. Break-Even = $40,480</li>
+                <li>Verificación:</li>
+                <li>- Compra: 0.1 BTC a $40,000 + $24 fee = $4,024</li>
+                <li>- Venta: 0.1 BTC a $40,480 - $24.29 fee = $4,023.71</li>
+                <li>- Diferencia ≈ $0 (break-even)</li>
+            </ul>
+        </div>
+
+        <h3>8. Validación de Daily Loss Limit 📉</h3>
+        <div class="calculator-example">
+            <div class="formula">Remaining = DAILY_LOSS_LIMIT - Sum(Today's Losses)</div>
+            Ejemplo con Límite $50:
+            <ul>
+                <li>DAILY_LOSS_LIMIT = $50</li>
+                <li>Trade 1: -$20 (pérdida)</li>
+                <li>Trade 2: +$15 (ganancia)</li>
+                <li>Trade 3: -$25 (pérdida)</li>
+                <li>Cálculos:</li>
+                <li>1. Pérdidas del día = -$20 - $25 = -$45</li>
+                <li>2. Ganancias no afectan el límite</li>
+                <li>3. Remaining = $50 - $45 = $5</li>
+                <li>4. Próximo trade máximo posible = $5</li>
+            </ul>
+        </div>
+
+        <div class="expected">
+            <strong>Procedimiento de Validación:</strong>
+            <ol>
+                <li>Para cada operación, calcular manualmente los valores esperados</li>
+                <li>Comparar con los valores mostrados por el bot</li>
+                <li>Verificar que la diferencia sea < 0.01% (error de redondeo)</li>
+                <li>Documentar cualquier discrepancia</li>
+            </ol>
+        </div>
+    </div>
+
+    <!-- Configuración Inicial -->
+    <div class="test-case">
+        <span class="test-id">TC-001: Configuración Inicial - API Keys</span>
+        <div class="category">Configuración</div>
+        <div class="precondition">
+            <strong>Precondiciones:</strong>
+            <ul>
+                <li>Programa recién instalado</li>
+                <li>Tener API Key y Secret de Coinbase</li>
+            </ul>
+        </div>
+        <ol class="steps">
+            <li>Abrir el programa</li>
+            <li>Ir a la pestaña "Configuration"</li>
+            <li>Click en ✏️ junto a API Key</li>
+            <li>Pegar API Key completa</li>
+            <li>Click en ✏️ junto a API Secret</li>
+            <li>Pegar clave privada completa (con BEGIN/END)</li>
+            <li>Click en "Save Configuration"</li>
+            <li>Click en "Test API Connection"</li>
+        </ol>
+        <div class="expected">
+            <strong>Resultado Esperado:</strong>
+            <ul>
+                <li>Mensaje de "Configuration saved successfully"</li>
+                <li>Todos los endpoints muestran ONLINE</li>
+                <li>Balance real se muestra correctamente</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="test-case">
+        <span class="test-id">TC-002: Verificación de Profit Target</span>
+        <div class="category">Trading Logic</div>
+        <div class="precondition">
+            <strong>Precondiciones:</strong>
+            <ul>
+                <li>API configurada y funcionando</li>
+                <li>Modo SIMULATION activado</li>
+                <li>No posiciones abiertas</li>
+            </ul>
+        </div>
+        <ol class="steps">
+            <li>Ir a "Trading" tab</li>
+            <li>Establecer Profit Target en 1.5%</li>
+            <li>Establecer Stop Loss en 1%</li>
+            <li>Establecer Position Size en $100</li>
+            <li>Click en "Buy BTC"</li>
+            <li>Esperar a que el precio suba 1.5%</li>
+            <li>Verificar que se ejecuta venta automática</li>
+        </ol>
+        <div class="expected">
+            <strong>Resultado Esperado:</strong>
+            <ul>
+                <li>Compra ejecutada al precio actual</li>
+                <li>Target Price calculado correctamente (precio entrada + 1.5%)</li>
+                <li>Venta automática cuando se alcanza target</li>
+                <li>Profit registrado en histórico</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="test-case">
+        <span class="test-id">TC-003: Validación de Stop Loss</span>
+        <div class="category">Risk Management</div>
+        <div class="precondition">
+            <strong>Precondiciones:</strong>
+            <ul>
+                <li>API configurada y funcionando</li>
+                <li>Modo SIMULATION activado</li>
+                <li>No posiciones abiertas</li>
+            </ul>
+        </div>
+        <ol class="steps">
+            <li>Ir a "Trading" tab</li>
+            <li>Establecer Stop Loss en 1%</li>
+            <li>Establecer Position Size en $100</li>
+            <li>Click en "Buy BTC"</li>
+            <li>Esperar a que el precio baje 1%</li>
+            <li>Verificar que se ejecuta stop loss</li>
+        </ol>
+        <div class="expected">
+            <strong>Resultado Esperado:</strong>
+            <ul>
+                <li>Stop Loss Price calculado correctamente (precio entrada - 1%)</li>
+                <li>Venta automática cuando se alcanza stop loss</li>
+                <li>Pérdida limitada al 1%</li>
+                <li>Pérdida registrada en histórico</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="test-case">
+        <span class="test-id">TC-004: Persistencia de Datos</span>
+        <div class="category">Database</div>
+        <div class="precondition">
+            <strong>Precondiciones:</strong>
+            <ul>
+                <li>Programa con historial de trades</li>
+                <li>Al menos 5 operaciones realizadas</li>
+            </ul>
+        </div>
+        <ol class="steps">
+            <li>Realizar una operación de compra</li>
+            <li>Cerrar el programa completamente</li>
+            <li>Reabrir el programa</li>
+            <li>Verificar "Trading History"</li>
+            <li>Verificar "Statistics" tab</li>
+            <li>Verificar posición actual</li>
+        </ol>
+        <div class="expected">
+            <strong>Resultado Esperado:</strong>
+            <ul>
+                <li>Todas las operaciones previas visibles</li>
+                <li>Estadísticas calculadas correctamente</li>
+                <li>Posición actual restaurada con precio entrada correcto</li>
+                <li>Balance histórico intacto</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="test-case">
+        <span class="test-id">TC-005: Límites de Posición</span>
+        <div class="category">Risk Management</div>
+        <div class="precondition">
+            <strong>Precondiciones:</strong>
+            <ul>
+                <li>API configurada y funcionando</li>
+                <li>Modo LIVE activado</li>
+                <li>Balance real disponible</li>
+            </ul>
+        </div>
+        <ol class="steps">
+            <li>Ir a "Configuration" tab</li>
+            <li>Establecer MAX_POSITION_SIZE en $100</li>
+            <li>Ir a "Trading" tab</li>
+            <li>Intentar comprar por $150</li>
+            <li>Verificar mensaje de error</li>
+            <li>Intentar comprar por $50</li>
+        </ol>
+        <div class="expected">
+            <strong>Resultado Esperado:</strong>
+            <ul>
+                <li>Compra de $150 rechazada</li>
+                <li>Mensaje claro indicando límite excedido</li>
+                <li>Compra de $50 ejecutada correctamente</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="test-case">
+        <span class="test-id">TC-006: Auto-Trading Logic</span>
+        <div class="category">Trading Logic</div>
+        <div class="precondition">
+            <strong>Precondiciones:</strong>
+            <ul>
+                <li>Modo SIMULATION activado</li>
+                <li>AUTO_BUY_ENABLED = true</li>
+                <li>AUTO_SELL_ENABLED = true</li>
+            </ul>
+        </div>
+        <ol class="steps">
+            <li>Establecer condiciones de compra automática</li>
+            <li>Esperar señal de compra</li>
+            <li>Verificar ejecución automática</li>
+            <li>Esperar alcanzar profit target</li>
+            <li>Verificar venta automática</li>
+        </ol>
+        <div class="expected">
+            <strong>Resultado Esperado:</strong>
+            <ul>
+                <li>Compra ejecutada según condiciones</li>
+                <li>Venta ejecutada al alcanzar target</li>
+                <li>Logs muestran decisiones correctamente</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="test-case">
+        <span class="test-id">TC-007: Validación de Balance</span>
+        <div class="category">Risk Management</div>
+        <div class="precondition">
+            <strong>Precondiciones:</strong>
+            <ul>
+                <li>Modo LIVE activado</li>
+                <li>Balance real conocido</li>
+            </ul>
+        </div>
+        <ol class="steps">
+            <li>Verificar balance inicial</li>
+            <li>Realizar compra pequeña</li>
+            <li>Verificar balance actualizado</li>
+            <li>Realizar venta</li>
+            <li>Verificar balance final</li>
+        </ol>
+        <div class="expected">
+            <strong>Resultado Esperado:</strong>
+            <ul>
+                <li>Balance siempre refleja operaciones</li>
+                <li>Fees considerados en cálculos</li>
+                <li>No discrepancias con Coinbase</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="test-case">
+        <span class="test-id">TC-008: Recuperación de Errores</span>
+        <div class="category">Error Handling</div>
+        <div class="precondition">
+            <strong>Precondiciones:</strong>
+            <ul>
+                <li>Programa funcionando normalmente</li>
+                <li>Posición abierta</li>
+            </ul>
+        </div>
+        <ol class="steps">
+            <li>Desconectar internet</li>
+            <li>Esperar reconexión automática</li>
+            <li>Verificar estado de posición</li>
+            <li>Verificar precio actual</li>
+            <li>Verificar órdenes pendientes</li>
+        </ol>
+        <div class="expected">
+            <strong>Resultado Esperado:</strong>
+            <ul>
+                <li>Reconexión automática exitosa</li>
+                <li>Estado de posición preservado</li>
+                <li>Órdenes pendientes intactas</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="test-case">
+        <span class="test-id">TC-009: Cálculo de Profit/Loss</span>
+        <div class="category">Trading Logic</div>
+        <div class="precondition">
+            <strong>Precondiciones:</strong>
+            <ul>
+                <li>Historial de trades existente</li>
+                <li>Al menos 10 operaciones</li>
+            </ul>
+        </div>
+        <ol class="steps">
+            <li>Ir a "Statistics" tab</li>
+            <li>Verificar cálculos de profit total</li>
+            <li>Verificar profit por trade</li>
+            <li>Verificar win rate</li>
+            <li>Comparar con histórico manual</li>
+        </ol>
+        <div class="expected">
+            <strong>Resultado Esperado:</strong>
+            <ul>
+                <li>Profits calculados correctamente</li>
+                <li>Fees incluidos en cálculos</li>
+                <li>Estadísticas precisas</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="test-case">
+        <span class="test-id">TC-010: Modo Simulación vs Live</span>
+        <div class="category">Trading Modes</div>
+        <div class="precondition">
+            <strong>Precondiciones:</strong>
+            <ul>
+                <li>API configurada</li>
+                <li>Balance real disponible</li>
+            </ul>
+        </div>
+        <ol class="steps">
+            <li>Cambiar a modo SIMULATION</li>
+            <li>Realizar operación de prueba</li>
+            <li>Verificar que no afecta balance real</li>
+            <li>Cambiar a modo LIVE</li>
+            <li>Verificar advertencias</li>
+        </ol>
+        <div class="expected">
+            <strong>Resultado Esperado:</strong>
+            <ul>
+                <li>Modo SIMULATION no afecta fondos reales</li>
+                <li>Advertencias claras al cambiar a LIVE</li>
+                <li>Separación clara de balances</li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Continuar con más casos de prueba... -->
+
+</body>
+</html>
